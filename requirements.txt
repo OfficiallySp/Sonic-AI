@@ -1,0 +1,5 @@
+# Sonic the Hedgehog Clone - Dependencies
+# Install with: pip install -r requirements.txt
+
+pygame>=2.5.0
+numpy>=1.24.0
