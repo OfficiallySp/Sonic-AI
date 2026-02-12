@@ -17,6 +17,9 @@ const Player = {
     // State
     state: 'idle',  // idle, running, jumping, rolling, spindash, crouching, hurt, spring, dead
     grounded: false,
+    jumpBufferTimer: 0,  // Frames left to consume buffered jump (press before landing)
+    coyoteTimer: 0,     // Frames left to jump after leaving ground
+    _jumpedWhileHolding: false,  // Prevent repeat jump when holding key
     invincible: 0,
     invincibleFlash: false,
     animFrame: 0,
@@ -71,6 +74,9 @@ const Player = {
         this.spindashCharge = 0;
         this.controlLock = 0;
         this.lookTimer = 0;
+        this.jumpBufferTimer = 0;
+        this.coyoteTimer = 0;
+        this._jumpedWhileHolding = false;
         this.time = 0;
         this.checkpointX = spawnX;
         this.checkpointY = spawnY;
@@ -91,6 +97,9 @@ const Player = {
         this.facing = 1;
         this.state = 'idle';
         this.grounded = false;
+        this.jumpBufferTimer = 0;
+        this.coyoteTimer = 0;
+        this._jumpedWhileHolding = false;
         this.invincible = 60;
         this.controlLock = 0;
     },
@@ -112,6 +121,12 @@ const Player = {
             this.invincibleFlash = false;
         }
         if (this.controlLock > 0) this.controlLock--;
+
+        // Buffer jump when pressed in air (allows jump if you land within ~100ms)
+        if (Input.jump && !this.grounded && this.state !== 'dead') {
+            this.jumpBufferTimer = CFG.JUMP_BUFFER_FRAMES;
+        }
+        if (Input.jumpReleased) this._jumpedWhileHolding = false;
 
         // State-specific update
         switch (this.state) {
@@ -136,6 +151,14 @@ const Player = {
 
         // Entity interactions
         this.checkEntities();
+
+        // Coyote time & jump buffer decay (after moveAndCollide set grounded)
+        if (this.grounded) {
+            this.coyoteTimer = CFG.COYOTE_TIME_FRAMES;
+        } else {
+            this.coyoteTimer = Math.max(0, this.coyoteTimer - 1);
+        }
+        if (this.jumpBufferTimer > 0) this.jumpBufferTimer--;
 
         // Fell off level
         if (this.y > World.level.height * CFG.TILE + 64) {
@@ -173,7 +196,7 @@ const Player = {
         }
 
         // Jump
-        if (Input.jump && this.grounded) {
+        if (this.canJump()) {
             this.doJump();
         }
     },
@@ -217,7 +240,7 @@ const Player = {
         if (this.vx < -CFG.TOP_SPEED) this.vx = -CFG.TOP_SPEED;
 
         // Jump
-        if (Input.jump && this.grounded) {
+        if (this.canJump()) {
             this.doJump();
             return;
         }
@@ -298,7 +321,7 @@ const Player = {
         }
 
         // Jump out of roll
-        if (Input.jump && this.grounded) {
+        if (this.canJump()) {
             this.doJump();
             return;
         }
@@ -397,10 +420,21 @@ const Player = {
         }
     },
 
+    // Can jump if on ground (or coyote time) and have jump input (or buffered, or holding)
+    canJump() {
+        const hasGround = this.grounded || this.coyoteTimer > 0;
+        const hasJumpInput = Input.jump || this.jumpBufferTimer > 0 ||
+            (Input.jumpHeld && !this._jumpedWhileHolding);
+        return hasGround && hasJumpInput && this.controlLock <= 0;
+    },
+
     // ---- JUMP ----
     doJump() {
         this.vy = CFG.JUMP_FORCE;
         this.grounded = false;
+        this.coyoteTimer = 0;
+        this.jumpBufferTimer = 0;
+        this._jumpedWhileHolding = true;
         this.state = 'jumping';
         Sound.jump();
         // Dust

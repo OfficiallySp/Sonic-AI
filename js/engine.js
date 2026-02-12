@@ -22,6 +22,8 @@ const CFG = {
     ROLL_DECEL: 0.025,
     JUMP_FORCE: -11.5,
     MIN_JUMP: -4,
+    JUMP_BUFFER_FRAMES: 10,  // Press jump ~166ms before landing, still jump
+    COYOTE_TIME_FRAMES: 8,   // Jump within ~133ms after leaving ledge
     SPINDASH_POWER: 8,
     SPINDASH_CHARGE: 2,
     SPINDASH_MAX: 14,

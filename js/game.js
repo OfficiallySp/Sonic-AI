@@ -85,12 +85,12 @@ const Game = {
         this.lastTime = timestamp;
         this.accumulator += Math.min(dt, 100); // Cap to prevent spiral of death
 
-        // Fixed timestep updates
+        // Fixed timestep updates (Input.update only once per frame - avoids clearing press before all logic runs)
         while (this.accumulator >= this.TIMESTEP) {
             this.update();
-            Input.update();
             this.accumulator -= this.TIMESTEP;
         }
+        Input.update();
 
         // Render
         this.render();
