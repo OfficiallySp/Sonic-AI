@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sonic: Emerald Rush</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+
+        #gameCanvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            border: 2px solid #1a1a2e;
+            cursor: none;
+        }
+
+        #loading {
+            position: absolute;
+            color: #4488ff;
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        #loading .spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #224;
+            border-top-color: #4488ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading Sonic: Emerald Rush...</div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Game scripts loaded in dependency order -->
+    <script src="js/engine.js"></script>
+    <script src="js/graphics.js"></script>
+    <script src="js/world.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/game.js"></script>
+</body>
+</html>
