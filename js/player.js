@@ -24,6 +24,7 @@ const Player = {
     invincibleFlash: false,
     animFrame: 0,
     animTimer: 0,
+    isFastRunning: false, // Hysteresis flag for fast-run animation (prevents flicker near threshold)
     spindashCharge: 0,
     controlLock: 0,  // Frames of no input (after hurt, spring, etc.)
     deathTimer: 0,
@@ -667,23 +668,38 @@ const Player = {
     updateAnimation() {
         const speed = Math.abs(this.vx);
 
+        // Leaving the running state clears the fast-run latch so we don't
+        // resume in the wrong animation set next time we start running.
+        if (this.state !== 'running' && this.isFastRunning) {
+            this.isFastRunning = false;
+        }
+
         switch (this.state) {
             case 'idle':
                 this.animFrame = 0;
                 break;
 
-            case 'running':
-                // Faster animation at higher speeds
+            case 'running': {
+                // Hysteresis prevents flicker when speed hovers around the
+                // fast-run threshold: enter fast-run at >6, exit only at <4.
+                const wasFast = this.isFastRunning;
+                if (!wasFast && speed > 6) {
+                    this.isFastRunning = true;
+                    this.animTimer = 0;
+                    this.animFrame = 0;
+                } else if (wasFast && speed < 4) {
+                    this.isFastRunning = false;
+                    this.animTimer = 0;
+                    this.animFrame = 0;
+                }
+
                 const runSpeed = Math.max(0.1, speed * 0.08);
                 this.animTimer += runSpeed;
-                if (speed > 5) {
-                    // Fast run (blurred legs)
-                    this.animFrame = Math.floor(this.animTimer) % 4;
-                } else {
-                    this.animFrame = Math.floor(this.animTimer) % 6;
-                }
+                const frameCount = this.isFastRunning ? 4 : 6;
+                this.animFrame = Math.floor(this.animTimer) % frameCount;
                 this.facing = this.vx > 0 ? 1 : this.vx < 0 ? -1 : this.facing;
                 break;
+            }
 
             case 'jumping':
             case 'rolling':
@@ -732,7 +748,7 @@ const Player = {
 
                 if (isSkidding && speed > 2) {
                     sprite = S.sonicSkid;
-                } else if (speed > 5) {
+                } else if (this.isFastRunning) {
                     sprite = S.sonicFastRun[this.animFrame % S.sonicFastRun.length];
                 } else {
                     sprite = S.sonicRun[this.animFrame % S.sonicRun.length];
