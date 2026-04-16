@@ -102,6 +102,7 @@ const Sound = {
     sfxGain: null,
     musicPlaying: false,
     musicNodes: [],
+    musicGeneration: 0,
 
     init() {
         try {
@@ -293,13 +294,23 @@ const Sound = {
         if (!this.ctx) return;
         this.stopMusic();
         this.musicPlaying = true;
+        this.musicGeneration++;
+        const gen = this.musicGeneration;
 
         const beatLen = 60 / tempo;
         const totalBeats = notePattern.length;
         const loopDur = totalBeats * beatLen;
 
         const scheduleLoop = (startTime) => {
-            if (!this.musicPlaying) return;
+            if (!this.musicPlaying || gen !== this.musicGeneration) return;
+
+            const addNode = (osc) => {
+                osc.onended = () => {
+                    const idx = this.musicNodes.indexOf(osc);
+                    if (idx !== -1) this.musicNodes.splice(idx, 1);
+                };
+                this.musicNodes.push(osc);
+            };
 
             notePattern.forEach((note, i) => {
                 if (note > 0) {
@@ -314,7 +325,7 @@ const Sound = {
                     g.connect(this.musicGain);
                     osc.start(t);
                     osc.stop(t + beatLen);
-                    this.musicNodes.push(osc);
+                    addNode(osc);
                 }
             });
 
@@ -332,7 +343,7 @@ const Sound = {
                         g.connect(this.musicGain);
                         osc.start(t);
                         osc.stop(t + beatLen);
-                        this.musicNodes.push(osc);
+                        addNode(osc);
                     }
                 });
             }

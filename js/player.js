@@ -26,6 +26,7 @@ const Player = {
     animTimer: 0,
     spindashCharge: 0,
     controlLock: 0,  // Frames of no input (after hurt, spring, etc.)
+    deathTimer: 0,
     lookTimer: 0,
 
     // Stats
@@ -73,6 +74,7 @@ const Player = {
         this.animTimer = 0;
         this.spindashCharge = 0;
         this.controlLock = 0;
+        this.deathTimer = 0;
         this.lookTimer = 0;
         this.jumpBufferTimer = 0;
         this.coyoteTimer = 0;
@@ -102,14 +104,23 @@ const Player = {
         this._jumpedWhileHolding = false;
         this.invincible = 60;
         this.controlLock = 0;
+        this.deathTimer = 0;
+        this.time = 0;
     },
 
     // ---- MAIN UPDATE ----
     update() {
-        // Death animation: fly up then fall off screen
         if (this.state === 'dead') {
             this.vy += CFG.GRAVITY;
             this.y += this.vy;
+            if (this.deathTimer > 0) {
+                this.deathTimer--;
+                if (this.deathTimer <= 0) {
+                    if (typeof Game !== 'undefined' && Game.onPlayerDeath) {
+                        Game.onPlayerDeath();
+                    }
+                }
+            }
             return;
         }
 
@@ -646,15 +657,10 @@ const Player = {
         this.vy = -12;
         this.vx = 0;
         this.grounded = false;
+        this.deathTimer = 90;
+        Sound.stopMusic();
         Sound.hurt();
         Camera.shake(6, 15);
-
-        // Game handles death (lives, game over)
-        setTimeout(() => {
-            if (typeof Game !== 'undefined' && Game.onPlayerDeath) {
-                Game.onPlayerDeath();
-            }
-        }, 1500);
     },
 
     // ---- ANIMATION ----

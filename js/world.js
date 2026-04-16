@@ -172,7 +172,7 @@ class Crawler {
         GFX.draw(ctx, spr,
             Camera.screenX(this.x - 16),
             Camera.screenY(this.y - 14),
-            this.vx > 0);
+            this.vx < 0);
     }
 
     destroy() {
@@ -234,7 +234,7 @@ class Flyer {
         GFX.draw(ctx, spr,
             Camera.screenX(this.x - 18),
             Camera.screenY(this.y - 15),
-            this.vx > 0);
+            this.vx < 0);
     }
 
     destroy() {
@@ -515,16 +515,16 @@ const World = {
         const ringGroups = [
             // Opening rings (learning area)
             ...this._ringLine(5, 13, 6, 0),
-            ...this._ringLine(16, 11, 4, 0),
+            ...this._ringLine(16, 11, 3, 0),
             // Above first hill
             ...this._ringLine(18, 9, 3, 0),
             // After gap
             ...this._ringLine(46, 13, 4, 0),
             // Rising section rings
-            ...this._ringLine(52, 12, 5, 0),
+            ...this._ringLine(52, 9, 5, 0),
             ...this._ringLine(60, 9, 6, 0),
             // On platforms
-            ...this._ringLine(65, 5, 4, 0),
+            ...this._ringLine(65, 5, 3, 0),
             ...this._ringLine(70, 3, 3, 0),
             // Hill top rings
             ...this._ringLine(110, 8, 8, 0),
@@ -546,13 +546,13 @@ const World = {
         ringGroups.forEach(r => ents.push(new Ring(r.x * T + 16, r.y * T + 16)));
 
         // Enemies
-        ents.push(new Crawler(30 * T, 14 * T + 8, -1));
-        ents.push(new Crawler(85 * T, 15 * T + 8, 1));
-        ents.push(new Crawler(130 * T, 15 * T + 8, -1));
-        ents.push(new Crawler(170 * T, 15 * T + 8, -1));
-        ents.push(new Crawler(195 * T, 15 * T + 8, 1));
-        ents.push(new Crawler(240 * T, 15 * T + 8, -1));
-        ents.push(new Crawler(260 * T, 15 * T + 8, 1));
+        ents.push(new Crawler(30 * T, 15 * T - 16, -1));
+        ents.push(new Crawler(85 * T, 16 * T - 16, 1));
+        ents.push(new Crawler(130 * T, 16 * T - 16, -1));
+        ents.push(new Crawler(170 * T, 16 * T - 16, -1));
+        ents.push(new Crawler(195 * T, 16 * T - 16, 1));
+        ents.push(new Crawler(240 * T, 16 * T - 16, -1));
+        ents.push(new Crawler(260 * T, 16 * T - 16, 1));
 
         ents.push(new Flyer(55 * T, 8 * T, -1));
         ents.push(new Flyer(95 * T, 6 * T, 1));
@@ -706,7 +706,7 @@ const World = {
             ...this._ringArc(103, 11, 6, 5),
             ...this._ringLine(110, 8, 4, 0),
             ...this._ringLine(130, 8, 8, 0),
-            ...this._ringLine(132, 4, 4, 0),
+            ...this._ringLine(132, 4, 3, 0),
             ...this._ringLine(155, 15, 8, 0),
             ...this._ringLine(167, 8, 3, 0),
             ...this._ringArc(178, 11, 4, 5),
@@ -722,18 +722,18 @@ const World = {
         ringGroups.forEach(r => ents.push(new Ring(r.x * T + 16, r.y * T + 16)));
 
         // Enemies (more of them)
-        ents.push(new Crawler(28 * T, 12 * T + 8, -1));
-        ents.push(new Crawler(48 * T, 16 * T + 8, 1));
-        ents.push(new Crawler(75 * T, 12 * T + 8, -1));
-        ents.push(new Crawler(92 * T, 16 * T + 8, 1));
-        ents.push(new Crawler(112 * T, 16 * T + 8, -1));
-        ents.push(new Crawler(135 * T, 9 * T + 8, 1));
-        ents.push(new Crawler(160 * T, 16 * T + 8, -1));
-        ents.push(new Crawler(195 * T, 16 * T + 8, 1));
-        ents.push(new Crawler(215 * T, 17 * T + 8, -1));
-        ents.push(new Crawler(240 * T, 17 * T + 8, 1));
-        ents.push(new Crawler(265 * T, 10 * T + 8, -1));
-        ents.push(new Crawler(300 * T, 17 * T + 8, 1));
+        ents.push(new Crawler(28 * T, 13 * T - 16, -1));
+        ents.push(new Crawler(48 * T, 17 * T - 16, 1));
+        ents.push(new Crawler(75 * T, 13 * T - 16, -1));
+        ents.push(new Crawler(92 * T, 17 * T - 16, 1));
+        ents.push(new Crawler(112 * T, 17 * T - 16, -1));
+        ents.push(new Crawler(135 * T, 10 * T - 16, 1));
+        ents.push(new Crawler(160 * T, 17 * T - 16, -1));
+        ents.push(new Crawler(195 * T, 17 * T - 16, 1));
+        ents.push(new Crawler(215 * T, 18 * T - 16, -1));
+        ents.push(new Crawler(240 * T, 18 * T - 16, 1));
+        ents.push(new Crawler(265 * T, 11 * T - 16, -1));
+        ents.push(new Crawler(300 * T, 18 * T - 16, 1));
 
         ents.push(new Flyer(35 * T, 8 * T, -1));
         ents.push(new Flyer(60 * T, 7 * T, 1));
@@ -820,7 +820,7 @@ const World = {
     getTile(tx, ty) {
         if (!this.level) return TILE.EMPTY;
         if (tx < 0 || tx >= this.level.width || ty < 0 || ty >= this.level.height) {
-            return ty >= this.level.height ? TILE.FILL : TILE.EMPTY;
+            return TILE.EMPTY;
         }
         return this.level.tiles[ty][tx];
     },
@@ -846,7 +846,7 @@ const World = {
 
                 if (tile === TILE.SOLID || tile === TILE.FILL) {
                     // Full solid collision
-                    if (x + w > tileX && x < tileX + T && y + h > tileY && y < tileY + T) {
+                    if (x + w > tileX && x < tileX + T && y + h >= tileY && y < tileY + T) {
                         // Determine collision side based on overlap
                         const overlapL = (x + w) - tileX;
                         const overlapR = (tileX + T) - x;
@@ -869,7 +869,7 @@ const World = {
                     }
                 } else if (tile === TILE.PLATFORM) {
                     // One-way platform: only collide from top
-                    if (y + h > tileY && y + h < tileY + T * 0.6 && y < tileY) {
+                    if (y + h >= tileY && y + h < tileY + T * 0.6 && y < tileY) {
                         result.bottom = true;
                         if (result.groundY === null || tileY < result.groundY) {
                             result.groundY = tileY;
@@ -879,7 +879,7 @@ const World = {
                     // Slope going up to the right
                     const relX = Utils.clamp((x + w / 2) - tileX, 0, T);
                     const slopeY = tileY + T - (relX / T) * T;
-                    if (y + h > slopeY && x + w > tileX && x < tileX + T) {
+                    if (y + h >= slopeY && x + w > tileX && x < tileX + T) {
                         result.bottom = true;
                         result.slope = true;
                         if (result.groundY === null || slopeY < result.groundY) {
@@ -889,7 +889,7 @@ const World = {
                 } else if (tile === TILE.SLOPE_L) {
                     const relX = Utils.clamp((x + w / 2) - tileX, 0, T);
                     const slopeY = tileY + (relX / T) * T;
-                    if (y + h > slopeY && x + w > tileX && x < tileX + T) {
+                    if (y + h >= slopeY && x + w > tileX && x < tileX + T) {
                         result.bottom = true;
                         result.slope = true;
                         if (result.groundY === null || slopeY < result.groundY) {
@@ -957,7 +957,7 @@ const World = {
     // Draw all entities
     drawEntities(ctx) {
         this.entities.forEach(e => {
-            if (e.active && !(e instanceof Ring)) {
+            if (e.active && !(e instanceof Ring) && !(e instanceof ScatteredRing)) {
                 // Check visibility
                 const b = e.getBounds ? e.getBounds() : { x: e.x - 20, y: e.y - 20, w: 40, h: 40 };
                 if (Camera.visible(b.x, b.y, b.w, b.h)) {

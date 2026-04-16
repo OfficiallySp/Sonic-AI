@@ -42,13 +42,14 @@ const GFX = {
     // ---- SONIC SPRITES ----
     genSonic() {
         const S = this.sprites;
-        const W = 36, H = 40;
+        const W = 36, H = 52;
+        const BODY_Y = 22;
 
         // Helper to draw Sonic's body at given params
         const drawBody = (ctx, opts) => {
             const { lean = 0, crouch = 0, legPhase = 0, armPhase = 0 } = opts;
             ctx.save();
-            ctx.translate(W / 2, H / 2 + 2);
+            ctx.translate(W / 2, BODY_Y);
             ctx.rotate(lean);
 
             const bodyY = crouch * 4;
@@ -182,7 +183,7 @@ const GFX = {
         for (let i = 0; i < 4; i++) {
             S.sonicFastRun.push(this._s(W, H, (ctx) => {
                 ctx.save();
-                ctx.translate(W / 2, H / 2 + 2);
+                ctx.translate(W / 2, BODY_Y);
                 ctx.rotate(0.2);
 
                 // Spikes
@@ -295,18 +296,17 @@ const GFX = {
         // Skid frame
         S.sonicSkid = this._s(W, H, (ctx) => {
             drawBody(ctx, { lean: -0.15, legPhase: 1.2, armPhase: -0.8 });
-            // Add dust lines
             ctx.fillStyle = 'rgba(200,180,150,0.5)';
             for (let i = 0; i < 3; i++) {
-                ctx.fillRect(W / 2 + 5 + i * 6, H / 2 + 12, 4, 2);
+                ctx.fillRect(W / 2 + 5 + i * 6, BODY_Y + 12, 4, 2);
             }
         });
 
         // Hurt frame
         S.sonicHurt = this._s(W, H, (ctx) => {
-            ctx.translate(W / 2, H / 2);
+            ctx.translate(W / 2, BODY_Y);
             ctx.rotate(-0.3);
-            ctx.translate(-W / 2, -H / 2);
+            ctx.translate(-W / 2, -BODY_Y);
             drawBody(ctx, { lean: 0, legPhase: 2, armPhase: -1.5 });
         });
 
