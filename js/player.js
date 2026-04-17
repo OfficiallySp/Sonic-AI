@@ -497,54 +497,70 @@ const Player = {
     },
 
     // ---- MOVEMENT & COLLISION ----
+    // Resolve horizontal and vertical motion separately. Each pass only
+    // honors collision sides that match its own axis so standing on the
+    // ground while running never produces a spurious "bottom" resolve that
+    // could lift the player off the tile — and walking onto a new ground
+    // tile can't be mis-reported as a horizontal push that strands Sonic
+    // one frame above the ground (the cause of random fall-throughs).
     moveAndCollide() {
-        const bounds = this.getBounds();
-        const oldGrounded = this.grounded;
         this.grounded = false;
 
-        // Horizontal movement
+        // Horizontal pass: move on X, then correct only X-axis collisions.
+        // We shrink the probe rect vertically by a couple pixels so the
+        // ground tile directly under Sonic never counts as a wall.
         this.x += this.vx;
-        let hBounds = this.getBounds();
-        let col = World.collide(hBounds.x, hBounds.y, hBounds.w, hBounds.h);
-
-        if (col.left) {
-            // Push right
-            const tileX = Math.floor(hBounds.x / CFG.TILE) * CFG.TILE + CFG.TILE;
-            this.x = tileX + this.w / 2;
-            this.vx = 0;
-        }
-        if (col.right) {
-            // Push left
-            const tileX = Math.floor((hBounds.x + hBounds.w) / CFG.TILE) * CFG.TILE;
-            this.x = tileX - this.w / 2;
-            this.vx = 0;
-        }
-
-        // Vertical movement
-        this.y += this.vy;
-        let vBounds = this.getBounds();
-        col = World.collide(vBounds.x, vBounds.y, vBounds.w, vBounds.h);
-
-        if (col.bottom && this.vy >= 0) {
-            if (col.groundY !== null) {
-                this.y = col.groundY;
+        {
+            const b = this.getBounds();
+            const col = World.collide(b.x, b.y + 2, b.w, b.h - 4);
+            if (this.vx > 0 && col.right) {
+                const tileX = Math.floor((b.x + b.w) / CFG.TILE) * CFG.TILE;
+                this.x = tileX - this.w / 2;
+                this.vx = 0;
+            } else if (this.vx < 0 && col.left) {
+                const tileX = Math.floor(b.x / CFG.TILE) * CFG.TILE + CFG.TILE;
+                this.x = tileX + this.w / 2;
+                this.vx = 0;
             }
-            this.vy = 0;
-            this.grounded = true;
-        }
-        if (col.top && this.vy < 0) {
-            // Hit ceiling
-            const tileY = Math.floor(vBounds.y / CFG.TILE) * CFG.TILE + CFG.TILE;
-            this.y = tileY + this.h;
-            this.vy = 0;
         }
 
-        // Prevent going off-screen left
+        // Vertical pass: move on Y, then correct only Y-axis collisions.
+        this.y += this.vy;
+        {
+            const b = this.getBounds();
+            const col = World.collide(b.x, b.y, b.w, b.h);
+            if (this.vy >= 0 && col.bottom) {
+                if (col.groundY !== null) this.y = col.groundY;
+                this.vy = 0;
+                this.grounded = true;
+            } else if (this.vy < 0 && col.top) {
+                const tileY = Math.floor(b.y / CFG.TILE) * CFG.TILE + CFG.TILE;
+                this.y = tileY + this.h;
+                this.vy = 0;
+            }
+        }
+
+        // Second ground-probe: if we just walked onto a new ground tile but
+        // vy was tiny (e.g., sliding along flat terrain), the vertical pass
+        // above may not have registered a snap. Check a 2-pixel stub below
+        // Sonic's feet and clamp down if there's ground right there.
+        if (!this.grounded && this.vy >= 0) {
+            const b = this.getBounds();
+            const probe = World.collide(b.x, b.y + b.h, b.w, 2);
+            if (probe.bottom && probe.groundY !== null) {
+                const drop = probe.groundY - this.y;
+                if (drop >= -1 && drop <= 2) {
+                    this.y = probe.groundY;
+                    this.vy = 0;
+                    this.grounded = true;
+                }
+            }
+        }
+
         if (this.x < this.w / 2) {
             this.x = this.w / 2;
             this.vx = 0;
         }
-        // Prevent going past level right edge
         if (this.x > World.level.width * CFG.TILE - this.w / 2) {
             this.x = World.level.width * CFG.TILE - this.w / 2;
             this.vx = 0;

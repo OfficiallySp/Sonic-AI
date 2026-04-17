@@ -7,7 +7,7 @@ const Game = {
     ctx: null,
     state: 'loading',  // loading, title, playing, paused, levelComplete, gameOver, victory
     currentLevel: 0,
-    totalLevels: 2,
+    totalLevels: 3,
     frameCount: 0,
     lastTime: 0,
     accumulator: 0,
@@ -271,11 +271,16 @@ const Game = {
     // ---- GAME FLOW ----
 
     startGame() {
-        this.currentLevel = 0;
+        // Optional dev shortcut: "#2" in the URL jumps straight to level 3.
+        // Useful for testing specific zones without replaying earlier acts.
+        const hashLevel = parseInt(window.location.hash.replace('#', ''), 10);
+        const startAt = (Number.isFinite(hashLevel) && hashLevel >= 0 && hashLevel < this.totalLevels)
+            ? hashLevel : 0;
+        this.currentLevel = startAt;
         Player.lives = CFG.START_LIVES;
         Player.score = 0;
         Player.rings = 0;
-        this.loadLevel(0);
+        this.loadLevel(startAt);
         this.state = 'playing';
         this.startTransition('fadeIn', 0.04);
     },
@@ -609,7 +614,7 @@ const Game = {
         ctx.fillRect(CFG.WIDTH - 180, CFG.HEIGHT - 32, 180, 32);
         ctx.font = '14px sans-serif';
         ctx.fillStyle = '#FFD700';
-        const levelNames = ['EMERALD VALLEY', 'NEON FACTORY'];
+        const levelNames = ['EMERALD VALLEY', 'NEON FACTORY', 'SKY SANCTUARY'];
         ctx.fillText(levelNames[this.currentLevel] + ' - ACT ' + (this.currentLevel + 1), CFG.WIDTH - pad, CFG.HEIGHT - 12);
     },
 
@@ -641,7 +646,7 @@ const Game = {
         ctx.textAlign = 'center';
         ctx.font = 'bold 40px sans-serif';
         ctx.fillStyle = '#FFD700';
-        const levelNames = ['EMERALD VALLEY', 'NEON FACTORY'];
+        const levelNames = ['EMERALD VALLEY', 'NEON FACTORY', 'SKY SANCTUARY'];
         ctx.fillText(levelNames[this.currentLevel], cx, startY);
 
         ctx.font = 'bold 24px sans-serif';

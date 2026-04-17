@@ -35,6 +35,7 @@ A 2D Sonic the Hedgehog clone built entirely with JavaScript and HTML5 Canvas. N
 ### Levels
 1. **Emerald Valley** (Act 1) - Lush green hills inspired by Green Hill Zone. Rolling terrain, palm trees, and gentle introduction to mechanics.
 2. **Neon Factory** (Act 2) - Dark industrial zone with metallic platforms. Harder enemy placement and trickier platforming.
+3. **Sky Sanctuary** (Act 3) - Sunset temple floating above the clouds. Marble platforms, classical columns, long spring chains, and a sky-high bonus route over a climactic temple plateau.
 
 ### Enemies
 - **Crawler** (red bug robot): Patrols ground left and right. Jump on or roll into to destroy.

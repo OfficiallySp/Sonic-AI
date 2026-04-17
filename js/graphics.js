@@ -46,19 +46,12 @@ const GFX = {
         const W = 36, H = 52;
         const BODY_Y = 22;
 
-        // Helper to draw Sonic's body at given params.
-        // legPhase: 0..2π drives a smooth running cycle. Left and right legs
-        //           are 180° out of phase so exactly one is forward at a time.
-        // armPhase: similar, manually set for non-run poses (idle/skid/hurt).
-        const drawBody = (ctx, opts) => {
-            const { lean = 0, crouch = 0, legPhase = 0, armPhase = 0, isRun = false } = opts;
-            ctx.save();
-            ctx.translate(W / 2, BODY_Y);
-            ctx.rotate(lean);
-
+        // Shared upper-body renderer used by every non-ball pose. Draws the
+        // parts that never change during a run cycle: spikes, torso, head,
+        // face, eye, ear. The caller is responsible for the legs and arm.
+        const drawUpperBody = (ctx, crouch) => {
             const bodyY = crouch * 4;
 
-            // Spikes (3 blue triangles on back of head)
             ctx.fillStyle = '#1838AA';
             for (let i = 0; i < 3; i++) {
                 ctx.save();
@@ -73,113 +66,164 @@ const GFX = {
                 ctx.restore();
             }
 
-            // Body
             ctx.fillStyle = '#2855DD';
             ctx.beginPath();
             ctx.ellipse(0, 2 + bodyY, 9, 10 - crouch * 3, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            // Belly
             ctx.fillStyle = '#FFCC88';
             ctx.beginPath();
             ctx.ellipse(3, 4 + bodyY, 5, 6 - crouch * 2, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            // Head
             ctx.fillStyle = '#2855DD';
             ctx.beginPath();
             ctx.arc(1, -10 + bodyY, 10, 0, Math.PI * 2);
             ctx.fill();
 
-            // Face
             ctx.fillStyle = '#FFCC88';
             ctx.beginPath();
             ctx.ellipse(6, -9 + bodyY, 6, 7, 0, -0.5, 1.2);
             ctx.lineTo(6, -2 + bodyY);
             ctx.fill();
 
-            // Nose
             ctx.fillStyle = '#FFCC88';
             ctx.beginPath();
             ctx.arc(12, -7 + bodyY, 2.5, 0, Math.PI * 2);
             ctx.fill();
 
-            // Eye (white)
             ctx.fillStyle = '#FFFFFF';
             ctx.beginPath();
             ctx.ellipse(5, -12 + bodyY, 4.5, 5.5, 0.1, 0, Math.PI * 2);
             ctx.fill();
 
-            // Pupil
             ctx.fillStyle = '#111';
             ctx.beginPath();
             ctx.ellipse(7.5, -11 + bodyY, 2, 3.5, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            // Eye shine
             ctx.fillStyle = '#FFFFFF';
             ctx.beginPath();
             ctx.arc(6.5, -13 + bodyY, 1, 0, Math.PI * 2);
             ctx.fill();
 
-            // Ear (inner)
             ctx.fillStyle = '#FFCC88';
             ctx.beginPath();
             ctx.ellipse(1, -17 + bodyY, 2, 3, -0.3, 0, Math.PI * 2);
             ctx.fill();
+        };
 
-            // Legs. For running (isRun=true), each leg uses its own phase
-            // offset by π so one is always forward while the other is back —
-            // every frame is a distinct pose, no duplicate-frame jitter.
-            // For static poses (skid/hurt/idle), fall back to a single
-            // legPhase-driven spread so existing callers still look right.
-            let bxOff, byOff, fxOff, fyOff;
-            if (isRun) {
-                const legY = (phase) => Math.sin(phase) * 4;
-                const legX = (phase) => Math.cos(phase) * 5;
-                bxOff = legX(legPhase + Math.PI);
-                byOff = Math.max(0, legY(legPhase + Math.PI));
-                fxOff = legX(legPhase);
-                fyOff = Math.max(0, legY(legPhase));
-            } else {
-                const legSpread = Math.sin(legPhase) * 8;
-                bxOff = 0;
-                byOff = Math.max(0, -legSpread);
-                fxOff = 0;
-                fyOff = Math.max(0, legSpread);
-            }
+        // One leg: thigh line from the hip down to the shoe, then the red
+        // shoe pod with a white stripe. Hip is at local (hipX, hipY); the
+        // shoe sits at (hipX + dx, hipY + 6 + dy).
+        const drawLeg = (ctx, hipX, hipY, dx, dy) => {
+            const shoeX = hipX + dx;
+            const shoeY = hipY + 6 + dy;
 
-            ctx.fillStyle = '#FFCC88';
-            ctx.fillRect(-3 + bxOff * 0.3, 10 + bodyY, 4, 4 + byOff);
+            ctx.strokeStyle = '#FFCC88';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(hipX, hipY);
+            ctx.lineTo(shoeX, shoeY - 1);
+            ctx.stroke();
+
             ctx.fillStyle = '#DD2222';
             ctx.beginPath();
-            ctx.ellipse(-1 + bxOff, 16 + bodyY + byOff, 5, 3.5, 0, 0, Math.PI * 2);
+            ctx.ellipse(shoeX, shoeY, 5, 3.5, 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(-5 + bxOff, 15 + bodyY + byOff, 6, 1.5);
 
-            ctx.fillStyle = '#FFCC88';
-            ctx.fillRect(2 + fxOff * 0.3, 10 + bodyY, 4, 4 + fyOff);
-            ctx.fillStyle = '#DD2222';
-            ctx.beginPath();
-            ctx.ellipse(4 + fxOff, 16 + bodyY + fyOff, 5, 3.5, 0, 0, Math.PI * 2);
-            ctx.fill();
             ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(0 + fxOff, 15 + bodyY + fyOff, 6, 1.5);
+            ctx.fillRect(shoeX - 4, shoeY - 0.75, 6, 1.5);
+        };
 
-            // Arm: during running, swing opposite to front leg. Otherwise use
-            // whatever armPhase the caller supplied (for idle/skid/hurt).
-            const effectiveArmPhase = isRun ? -Math.cos(legPhase) * 0.6 : armPhase;
+        // The arm + gloved hand. `angle` rotates the whole limb.
+        const drawArm = (ctx, bodyY, angle) => {
             ctx.fillStyle = '#FFCC88';
             ctx.save();
             ctx.translate(7, 2 + bodyY);
-            ctx.rotate(effectiveArmPhase);
+            ctx.rotate(angle);
             ctx.fillRect(0, -2, 4, 8);
             ctx.fillStyle = '#FFFFFF';
             ctx.beginPath();
             ctx.arc(2, 8, 3, 0, Math.PI * 2);
             ctx.fill();
             ctx.restore();
+        };
+
+        // Static-pose body: idle, skid, crouch, hurt, look-up. `legPhase`
+        // just controls a gentle legSpread so skidding still looks braced.
+        // This is intentionally simple — the running animation lives in
+        // drawRunFrame below so its sin() symmetry can never collapse
+        // neighboring frames into identical poses.
+        const drawBody = (ctx, opts) => {
+            const { lean = 0, crouch = 0, legPhase = 0, armPhase = 0 } = opts;
+            ctx.save();
+            ctx.translate(W / 2, BODY_Y);
+            ctx.rotate(lean);
+
+            const bodyY = crouch * 4;
+            drawUpperBody(ctx, crouch);
+
+            const legSpread = Math.sin(legPhase) * 8;
+            const backDy = Math.max(0, -legSpread);
+            const frontDy = Math.max(0, legSpread);
+            drawLeg(ctx, -1, 10 + bodyY, 0, backDy);
+            drawLeg(ctx,  3, 10 + bodyY, 0, frontDy);
+
+            drawArm(ctx, bodyY, armPhase);
+
+            ctx.restore();
+        };
+
+        // Running body: draws a single frame of the run cycle. `t` is the
+        // normalized phase 0..1 through one full stride. Each leg traces a
+        // walking oval — planted/pushing along the ground for the first
+        // 40% of its cycle, then lifted in an arc for the remaining 60%.
+        // The two legs run 180° out of phase so exactly one foot is driving
+        // the ground at a time. Every sampled frame is a distinct silhouette.
+        const legPose = (t) => {
+            const phaseN = ((t % 1) + 1) % 1;
+            if (phaseN < 0.4) {
+                // Planted stride: shoe slides from forward (+8) to back (-8).
+                const pushT = phaseN / 0.4;
+                return { dx: 8 - pushT * 16, dy: 0 };
+            }
+            // Aerial swing: shoe sweeps back-to-front above the ground in an arc.
+            const swingT = (phaseN - 0.4) / 0.6;
+            return {
+                dx: -8 + swingT * 16,
+                dy: -Math.sin(swingT * Math.PI) * 6,
+            };
+        };
+
+        const drawRunFrame = (ctx, t) => {
+            ctx.save();
+            ctx.translate(W / 2, BODY_Y);
+            ctx.rotate(0.15);
+
+            // Gentle body bob — crests twice per stride cycle as each foot
+            // strikes the ground. This breaks the visual symmetry between
+            // the two halves of the cycle so no two frames read as twins.
+            const bob = -Math.abs(Math.sin(t * Math.PI * 2)) * 1.5;
+            ctx.translate(0, bob);
+
+            drawUpperBody(ctx, 0);
+
+            // Two legs pump 180° out of phase through the running oval.
+            // Each leg has its own hip anchor (back leg left of centerline,
+            // front leg right) so the forward leg reaches further forward
+            // and the back leg further back — natural asymmetric territory.
+            const legA = legPose(t);
+            const legB = legPose(t + 0.5);
+            drawLeg(ctx, -1, 10, legA.dx, legA.dy);
+            drawLeg(ctx,  3, 10, legB.dx, legB.dy);
+
+            // Arm counter-swings in sync with leg A so the pumping arm
+            // reads naturally; the body bob above stays even between the
+            // two arm extremes.
+            const armAngle = Math.cos(t * Math.PI * 2) * 0.9;
+            drawArm(ctx, 0, armAngle);
 
             ctx.restore();
         };
@@ -187,17 +231,13 @@ const GFX = {
         // Idle frame
         S.sonicIdle = this._s(W, H, (ctx) => drawBody(ctx, { legPhase: 0, armPhase: 0 }));
 
-        // Run frames (8 frames). Using 8 instead of 6 avoids the mirror-image
-        // collapse of sin(π-x)==sin(x) that made the 6-frame cycle have only
-        // 3 unique poses. Each frame now shows a visually distinct stride.
+        // Run frames. 8 samples across the stride cycle gives enough fidelity
+        // for the eye to read continuous motion, without duplicate frames.
         S.sonicRun = [];
-        for (let i = 0; i < 8; i++) {
-            const phase = (i / 8) * Math.PI * 2;
-            S.sonicRun.push(this._s(W, H, (ctx) => drawBody(ctx, {
-                lean: 0.15,
-                legPhase: phase,
-                isRun: true,
-            })));
+        const RUN_FRAME_COUNT = 8;
+        for (let i = 0; i < RUN_FRAME_COUNT; i++) {
+            const t = i / RUN_FRAME_COUNT;
+            S.sonicRun.push(this._s(W, H, (ctx) => drawRunFrame(ctx, t)));
         }
 
         // Fast run (legs become circles/blur)
@@ -721,11 +761,72 @@ const GFX = {
             ctx.strokeRect(4, 4, T - 8, T - 8);
         });
 
+        // Grass top - theme 3 (sky sanctuary: marble + gold trim)
+        tc['grass3'] = this._s(T, T, (ctx) => {
+            // Creamy stone body
+            ctx.fillStyle = '#E8D8B8';
+            ctx.fillRect(0, 0, T, T);
+            // Subtle brick pattern
+            ctx.fillStyle = '#D4C09A';
+            for (let y = 0; y < T; y += 8) {
+                for (let x = 0; x < T; x += 8) {
+                    if ((x + y) % 16 === 0) ctx.fillRect(x, y, 8, 8);
+                }
+            }
+            // Gold trim strip
+            ctx.fillStyle = '#FFD770';
+            ctx.fillRect(0, 0, T, 6);
+            ctx.fillStyle = '#FFE8A0';
+            ctx.fillRect(0, 0, T, 2);
+            // Marble cap
+            ctx.fillStyle = '#FFFBEE';
+            ctx.fillRect(0, 6, T, 4);
+            // Warm shadow line beneath the cap
+            ctx.fillStyle = '#C89650';
+            ctx.fillRect(0, 10, T, 1);
+        });
+
+        // Ground - theme 3 (stone body with rune accents)
+        tc['dirt3'] = this._s(T, T, (ctx) => {
+            ctx.fillStyle = '#E8D8B8';
+            ctx.fillRect(0, 0, T, T);
+            ctx.fillStyle = '#D4C09A';
+            for (let y = 0; y < T; y += 8) {
+                for (let x = 0; x < T; x += 8) {
+                    if ((x + y) % 16 === 0) ctx.fillRect(x, y, 8, 8);
+                }
+            }
+            // Rune glyph in the middle
+            ctx.strokeStyle = '#B89660';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(10, 16); ctx.lineTo(22, 16);
+            ctx.moveTo(16, 10); ctx.lineTo(16, 22);
+            ctx.moveTo(12, 12); ctx.lineTo(20, 20);
+            ctx.stroke();
+        });
+
+        // Platform - theme 3 (gold-capped marble slab)
+        tc['plat3'] = this._s(T, T, (ctx) => {
+            ctx.fillStyle = '#F5ECD4';
+            ctx.fillRect(0, 0, T, T);
+            ctx.fillStyle = '#FFD770';
+            ctx.fillRect(0, 0, T, 5);
+            ctx.fillStyle = '#FFE8A0';
+            ctx.fillRect(0, 0, T, 2);
+            ctx.fillStyle = '#B89660';
+            ctx.fillRect(0, T - 4, T, 4);
+            // Gold edge caps
+            ctx.fillStyle = '#FFC850';
+            ctx.fillRect(0, 0, 2, T);
+            ctx.fillRect(T - 2, 0, 2, T);
+        });
+
         // Slope tiles (45 degree)
-        ['1', '2'].forEach(theme => {
-            const topColor = theme === '1' ? '#44BB44' : '#8888CC';
-            const fillColor = theme === '1' ? '#C4863C' : '#4A3A6A';
-            const checkColor = theme === '1' ? '#B87830' : '#5A4A7A';
+        ['1', '2', '3'].forEach(theme => {
+            const topColor = theme === '1' ? '#44BB44' : theme === '2' ? '#8888CC' : '#FFD770';
+            const fillColor = theme === '1' ? '#C4863C' : theme === '2' ? '#4A3A6A' : '#E8D8B8';
+            const checkColor = theme === '1' ? '#B87830' : theme === '2' ? '#5A4A7A' : '#D4C09A';
 
             // Slope going up-right
             tc[`slopeR${theme}`] = this._s(T, T, (ctx) => {
@@ -993,7 +1094,7 @@ const GFX = {
                 ctx.stroke();
             }
 
-        } else {
+        } else if (theme === 2) {
             // ---- NEON FACTORY ----
             const grad = ctx.createLinearGradient(0, 0, 0, h);
             grad.addColorStop(0, '#08062A');
@@ -1104,6 +1205,137 @@ const GFX = {
                     80 + Math.random() * 40, 'ember'
                 );
             }
+        } else {
+            // ---- SKY SANCTUARY ----
+            // Warm sunset-to-peach gradient for a high-altitude temple feel.
+            const grad = ctx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, '#FFB08C');
+            grad.addColorStop(0.35, '#FFB5D0');
+            grad.addColorStop(0.7, '#FFDCB4');
+            grad.addColorStop(1, '#FFEBD4');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, w, h);
+
+            // Big low sun with a warm halo
+            const sunX = w * 0.72, sunY = h * 0.45;
+            const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 260);
+            sunGrad.addColorStop(0, 'rgba(255,248,210,0.95)');
+            sunGrad.addColorStop(0.15, 'rgba(255,220,150,0.65)');
+            sunGrad.addColorStop(0.45, 'rgba(255,180,130,0.25)');
+            sunGrad.addColorStop(1, 'rgba(255,140,110,0)');
+            ctx.fillStyle = sunGrad;
+            ctx.fillRect(0, 0, w, h);
+
+            // Rotating god rays
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.translate(sunX, sunY);
+            const rayRot = t * 0.04;
+            for (let i = 0; i < 8; i++) {
+                ctx.save();
+                ctx.rotate(rayRot + i * (Math.PI / 4) + Math.sin(t * 0.3 + i) * 0.04);
+                const rg = ctx.createLinearGradient(0, 0, 520, 0);
+                rg.addColorStop(0, 'rgba(255,235,190,0.22)');
+                rg.addColorStop(1, 'rgba(255,235,190,0)');
+                ctx.fillStyle = rg;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(520, -50);
+                ctx.lineTo(520, 50);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+            ctx.restore();
+
+            // Pink far clouds (slow parallax)
+            ctx.fillStyle = 'rgba(255,200,220,0.7)';
+            for (let i = 0; i < 8; i++) {
+                const cx = ((i * 200 + 60) - camX * 0.04 + t * 6) % (w + 280) - 140;
+                const cy = 50 + i * 32 + Math.sin(i * 2 + t * 0.2) * 14;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+                ctx.arc(cx + 26, cy - 8, 26, 0, Math.PI * 2);
+                ctx.arc(cx + 50, cy, 28, 0, Math.PI * 2);
+                ctx.arc(cx + 22, cy + 8, 22, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Distant floating sanctuary islands with tiny columns (mid parallax)
+            for (let i = 0; i < 5; i++) {
+                const ix = ((i * 300) - camX * 0.09 + t * 3) % (w + 420) - 210;
+                const iy = h * 0.5 + (i & 1) * 34 + Math.sin(t * 0.1 + i) * 6;
+                // Island rock
+                ctx.fillStyle = 'rgba(200,165,195,0.6)';
+                ctx.beginPath();
+                ctx.ellipse(ix + 60, iy + 18, 60, 14, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillRect(ix + 20, iy + 6, 80, 14);
+                // Gold cap trim
+                ctx.fillStyle = 'rgba(255,215,130,0.6)';
+                ctx.fillRect(ix + 20, iy + 4, 80, 3);
+                // Three tiny columns
+                ctx.fillStyle = 'rgba(250,235,210,0.75)';
+                ctx.fillRect(ix + 38, iy - 22, 4, 28);
+                ctx.fillRect(ix + 58, iy - 22, 4, 28);
+                ctx.fillRect(ix + 78, iy - 22, 4, 28);
+                // Column caps
+                ctx.fillStyle = 'rgba(255,215,130,0.75)';
+                ctx.fillRect(ix + 36, iy - 24, 8, 3);
+                ctx.fillRect(ix + 56, iy - 24, 8, 3);
+                ctx.fillRect(ix + 76, iy - 24, 8, 3);
+            }
+
+            // Distant mountain silhouettes in pink haze
+            ctx.fillStyle = 'rgba(215,155,180,0.55)';
+            ctx.beginPath();
+            ctx.moveTo(0, h);
+            for (let x = 0; x <= w; x += 6) {
+                const hx = (x + camX * 0.06) * 0.007;
+                const hy = h - 220 + Math.sin(hx) * 60 + Math.sin(hx * 2.7) * 25;
+                ctx.lineTo(x, hy);
+            }
+            ctx.lineTo(w, h);
+            ctx.fill();
+
+            // Soft warm haze band
+            ctx.fillStyle = 'rgba(255,200,180,0.35)';
+            ctx.fillRect(0, h - 160, w, 160);
+
+            // Nearer white clouds (fast parallax)
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            for (let i = 0; i < 6; i++) {
+                const cx = ((i * 260 + 140) - camX * 0.14 + t * 14) % (w + 340) - 170;
+                const cy = 150 + (i & 1) * 50 + Math.sin(t * 0.4 + i) * 6;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 28, 0, Math.PI * 2);
+                ctx.arc(cx + 26, cy - 7, 24, 0, Math.PI * 2);
+                ctx.arc(cx + 52, cy, 26, 0, Math.PI * 2);
+                ctx.arc(cx + 22, cy + 8, 22, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Rolling cloud bank across the foreground
+            ctx.fillStyle = 'rgba(255,240,225,0.75)';
+            ctx.beginPath();
+            ctx.moveTo(0, h);
+            for (let x = 0; x <= w; x += 4) {
+                const hx = (x + camX * 0.28) * 0.018;
+                const hy = h - 70 + Math.sin(hx) * 20 + Math.sin(hx * 2.5) * 8;
+                ctx.lineTo(x, hy);
+            }
+            ctx.lineTo(w, h);
+            ctx.fill();
+
+            // Ambient golden sparkles drifting upward
+            if (Math.random() < 0.3 && typeof World !== 'undefined' && World.level) {
+                World.addParticle(
+                    Camera.x + Math.random() * w,
+                    Camera.y + h - Math.random() * 80,
+                    Utils.rand(-0.2, 0.2), Utils.rand(-1.0, -0.4),
+                    100 + Math.random() * 40, 'sparkle'
+                );
+            }
         }
     },
 
@@ -1161,6 +1393,42 @@ const GFX = {
         ctx.beginPath();
         ctx.arc(x + 10, y - 35, 10 + pulse * 3, 0, Math.PI * 2);
         ctx.fill();
+    },
+
+    // Classical marble column for the Sky Sanctuary zone.
+    // Draws a fluted shaft with a gold capital and plinth base, sitting on
+    // top of the ground at (x, y). y is the ground-level anchor.
+    drawPillar(ctx, x, y) {
+        // Plinth base
+        ctx.fillStyle = '#B89660';
+        ctx.fillRect(x - 3, y - 6, 22, 6);
+        ctx.fillStyle = '#8A6B3C';
+        ctx.fillRect(x - 3, y - 2, 22, 2);
+
+        // Marble shaft
+        ctx.fillStyle = '#F5ECD4';
+        ctx.fillRect(x + 2, y - 62, 12, 56);
+        // Left-side shading
+        ctx.fillStyle = '#DDCFB0';
+        ctx.fillRect(x + 2, y - 62, 3, 56);
+        // Vertical fluting
+        ctx.fillStyle = '#DDCFB0';
+        ctx.fillRect(x + 6, y - 62, 1, 56);
+        ctx.fillRect(x + 10, y - 62, 1, 56);
+
+        // Capital (gold top)
+        ctx.fillStyle = '#FFD770';
+        ctx.fillRect(x, y - 68, 16, 8);
+        ctx.fillStyle = '#FFE8A0';
+        ctx.fillRect(x, y - 68, 16, 3);
+        ctx.fillStyle = '#B89660';
+        ctx.fillRect(x, y - 62, 16, 2);
+
+        // Top ornament
+        ctx.fillStyle = '#FFF2C8';
+        ctx.fillRect(x - 2, y - 72, 20, 4);
+        ctx.fillStyle = '#C89650';
+        ctx.fillRect(x - 2, y - 69, 20, 1);
     },
 
     // ============================================================

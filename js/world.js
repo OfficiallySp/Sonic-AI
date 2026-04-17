@@ -191,8 +191,12 @@ class Crawler {
         const sx = Camera.screenX(this.x);
         const sy = Camera.screenY(this.y);
 
-        // Shadow under the crawler
-        GFX.drawShadow(ctx, sx, sy + 12, 16, 0.4);
+        // Shadow pinned to the actual terrain directly below the crawler,
+        // so it tracks cliffs / slope edges instead of floating near the sprite.
+        const groundY = World.groundYBelow(this.x, this.y + 4);
+        if (groundY !== null) {
+            GFX.drawShadow(ctx, sx, Camera.screenY(groundY), 14, 0.4);
+        }
 
         // Antenna light pulse
         GFX.drawGlow(ctx, sx + 6, sy - 22, 8, 'rgba(255,255,120,0.6)', 0.9);
@@ -262,11 +266,17 @@ class Flyer {
         const sx = Camera.screenX(this.x);
         const sy = Camera.screenY(this.y);
 
-        // Drop a blurry shadow on the ground below the flyer based on height
-        // above terrain (approximated via startY).
-        const shadowFall = 12;
-        const shadowScreenY = Camera.screenY(this.startY + shadowFall);
-        GFX.drawShadow(ctx, sx, shadowScreenY, 14, 0.25);
+        // Project shadow onto the actual ground below the flyer. Size and
+        // opacity scale with height so a flyer high in the sky casts a faint,
+        // slightly larger diffuse blob while one buzzing low casts a sharper one.
+        const groundY = World.groundYBelow(this.x, this.y);
+        if (groundY !== null) {
+            const height = groundY - this.y;
+            const t = Math.max(0, Math.min(1, height / 260));
+            const width = 10 + t * 6;
+            const opacity = 0.32 * (1 - t * 0.55);
+            GFX.drawShadow(ctx, sx, Camera.screenY(groundY), width, opacity);
+        }
 
         // Red eye glow
         const eyeOffset = this.vx < 0 ? -7 : 7;
@@ -564,6 +574,7 @@ const World = {
 
         if (levelNum === 0) return this.buildLevel1();
         if (levelNum === 1) return this.buildLevel2();
+        if (levelNum === 2) return this.buildLevel3();
     },
 
     // ---- LEVEL 1: EMERALD VALLEY ----
@@ -930,6 +941,224 @@ const World = {
         return this.level;
     },
 
+    // ---- LEVEL 3: SKY SANCTUARY ----
+    // A sunset temple in the clouds. Emphasizes vertical play, long spring
+    // chains, sky-high bonus routes, and a climactic pillar-lined finale.
+    buildLevel3() {
+        const W = 325, H = 24;
+        const tiles = Array.from({ length: H }, () => new Array(W).fill(TILE.EMPTY));
+        const T = CFG.TILE;
+        const theme = 3;
+
+        const ground = (x) => {
+            if (x < 0 || x >= W) return H;
+            // Opening terrace
+            if (x < 12) return 19;
+            // Gentle stairstep up to the sanctuary entry
+            if (x >= 12 && x < 18) return 19 - Math.floor((x - 12) * 0.5);
+            if (x >= 18 && x < 30) return 16;
+            // Small step down
+            if (x >= 30 && x < 33) return 17;
+            if (x >= 33 && x < 36) return 18;
+            if (x >= 36 && x < 42) return 19;
+            // First big chasm — crossed by stepping platforms
+            if (x >= 42 && x < 48) return H + 5;
+            if (x >= 48 && x < 60) return 18;
+            // Steep rise to a sky-high plateau
+            if (x >= 60 && x < 70) return 18 - Math.floor((x - 60) * 1.0);
+            if (x >= 70 && x < 85) return 8;
+            if (x >= 85 && x < 92) return 8 + Math.floor((x - 85) * 1.0);
+            if (x >= 92 && x < 105) return 15;
+            // Second chasm
+            if (x >= 105 && x < 112) return H + 5;
+            if (x >= 112 && x < 130) return 17;
+            // Speed straightaway
+            if (x >= 130 && x < 180) return 18;
+            // Gentle rolling hill
+            if (x >= 180 && x < 190) return 18 - Math.floor((x - 180) * 0.5);
+            if (x >= 190 && x < 205) return 13;
+            if (x >= 205 && x < 215) return 13 + Math.floor((x - 205) * 0.5);
+            if (x >= 215 && x < 220) return 18;
+            // Triple-pit gauntlet
+            if (x >= 220 && x < 224) return H + 5;
+            if (x >= 224 && x < 228) return 18;
+            if (x >= 228 && x < 232) return H + 5;
+            if (x >= 232 && x < 236) return 18;
+            if (x >= 236 && x < 240) return H + 5;
+            if (x >= 240 && x < 260) return 18;
+            // Grand rise up to the temple plateau
+            if (x >= 260 && x < 272) return 18 - Math.floor((x - 260) * 0.833);
+            if (x >= 272 && x < 298) return 8;
+            if (x >= 298 && x < 306) return 8 + Math.floor((x - 298) * 1.25);
+            if (x >= 306 && x < W) return 18;
+            return 18;
+        };
+
+        // Fill tiles based on ground function
+        for (let x = 0; x < W; x++) {
+            const gy = ground(x);
+            if (gy < H) {
+                tiles[gy][x] = TILE.SOLID;
+                for (let y = gy + 1; y < H; y++) {
+                    tiles[y][x] = TILE.FILL;
+                }
+            }
+        }
+
+        // Floating sanctuary platforms — islands of marble suspended in air
+        const platforms = [
+            [13, 13, 3], [24, 12, 3],            // opening aerial steps
+            [44, 16, 3], [46, 13, 3],            // bridge the first chasm
+            [53, 14, 4], [58, 11, 3],            // ramp up toward sky plateau
+            [73, 4, 3], [78, 2, 3],              // sky-high bonus route
+            [88, 12, 4], [97, 12, 3],            // descending path
+            [107, 14, 4], [113, 11, 3],          // bridge second chasm
+            [125, 15, 4],
+            [140, 15, 4], [148, 12, 3],          // start of climbing tower
+            [155, 9, 3], [162, 6, 3],            // top of climbing tower
+            [168, 4, 3],                         // highest aerial bonus
+            [195, 10, 5],                        // above the rolling hill
+            [222, 15, 3], [230, 14, 3], [238, 15, 3], // stepping stones over triple-pit
+            [250, 14, 4], [256, 11, 3],          // approach to temple
+            [275, 5, 3], [283, 5, 3],            // over-temple bonus
+            [300, 14, 4], [310, 12, 4],          // final descent
+        ];
+        platforms.forEach(([px, py, pw]) => {
+            for (let x = px; x < px + pw && x < W; x++) {
+                tiles[py][x] = TILE.PLATFORM;
+            }
+        });
+
+        // Entities
+        const ents = this.entities;
+        const playerStart = { x: 3 * T + 16, y: 19 * T };
+
+        // Rings — reward exploration of the aerial bonus paths
+        const ringGroups = [
+            // Opening terrace
+            ...this._ringLine(5, 17, 6, 0),
+            ...this._ringLine(14, 11, 3, 0),
+            // Plateau approach
+            ...this._ringLine(20, 14, 8, 0),
+            // Arc over the first chasm
+            ...this._ringArc(45, 15, 3, 4),
+            // Rising section
+            ...this._ringLine(52, 12, 4, 0),
+            ...this._ringLine(60, 11, 6, 0),
+            // Sky plateau
+            ...this._ringLine(72, 6, 10, 0),
+            // High bonus route
+            ...this._ringLine(74, 2, 3, 0),
+            ...this._ringLine(79, 0, 3, 0),
+            // Descent
+            ...this._ringLine(89, 10, 4, 0),
+            // Arc over the second chasm
+            ...this._ringArc(108, 13, 4, 5),
+            // Speed section mid air
+            ...this._ringLine(132, 14, 12, 0),
+            ...this._ringLine(150, 16, 10, 0),
+            // Climbing tower rings
+            ...this._ringLine(141, 13, 4, 0),
+            ...this._ringLine(149, 10, 3, 0),
+            ...this._ringLine(156, 7, 3, 0),
+            ...this._ringLine(169, 2, 3, 0),
+            // Rolling hill top
+            ...this._ringLine(192, 11, 8, 0),
+            // Over the rolling hill bonus
+            ...this._ringLine(196, 8, 4, 0),
+            // Arcs over each pit in the triple-pit gauntlet
+            ...this._ringArc(222, 14, 2, 3),
+            ...this._ringArc(230, 14, 2, 3),
+            ...this._ringArc(238, 14, 2, 3),
+            // Approach to temple
+            ...this._ringLine(251, 12, 4, 0),
+            ...this._ringLine(262, 14, 4, 0),
+            // Temple plateau — the prize run
+            ...this._ringLine(274, 6, 12, 0),
+            ...this._ringLine(276, 3, 3, 0),
+            ...this._ringLine(284, 3, 3, 0),
+            // Final descent
+            ...this._ringLine(302, 12, 4, 0),
+            ...this._ringLine(312, 10, 4, 0),
+        ];
+        ringGroups.forEach(r => ents.push(new Ring(r.x * T + 16, r.y * T + 16)));
+
+        // Enemies — a mix of ground guards and flyers patrolling the open sky
+        ents.push(new Crawler(25 * T, 16 * T - 16, -1));
+        ents.push(new Crawler(55 * T, 18 * T - 16, 1));
+        ents.push(new Crawler(76 * T, 8 * T - 16, -1));
+        ents.push(new Crawler(100 * T, 15 * T - 16, 1));
+        ents.push(new Crawler(120 * T, 17 * T - 16, -1));
+        ents.push(new Crawler(150 * T, 18 * T - 16, 1));
+        ents.push(new Crawler(175 * T, 18 * T - 16, -1));
+        ents.push(new Crawler(200 * T, 13 * T - 16, 1));
+        ents.push(new Crawler(245 * T, 18 * T - 16, -1));
+        ents.push(new Crawler(280 * T, 8 * T - 16, 1));
+        ents.push(new Crawler(310 * T, 18 * T - 16, -1));
+
+        ents.push(new Flyer(45 * T, 10 * T, -1));
+        ents.push(new Flyer(65 * T, 5 * T, 1));
+        ents.push(new Flyer(95 * T, 9 * T, -1));
+        ents.push(new Flyer(115 * T, 10 * T, 1));
+        ents.push(new Flyer(145 * T, 7 * T, -1));
+        ents.push(new Flyer(165 * T, 3 * T, 1));
+        ents.push(new Flyer(200 * T, 7 * T, -1));
+        ents.push(new Flyer(235 * T, 12 * T, 1));
+        ents.push(new Flyer(270 * T, 4 * T, -1));
+        ents.push(new Flyer(305 * T, 10 * T, 1));
+
+        // Springs — the sky zone uses them as the primary vertical traversal
+        ents.push(new Spring(30 * T, 16 * T, -14));
+        ents.push(new Spring(50 * T, 18 * T, -16));  // vault the first chasm
+        ents.push(new Spring(83 * T, 8 * T, -15));   // launch off the high plateau
+        ents.push(new Spring(104 * T, 15 * T, -16)); // vault the second chasm
+        ents.push(new Spring(140 * T, 18 * T, -15)); // up to the climbing tower
+        ents.push(new Spring(164 * T, 6 * T, -14));  // access top bonus
+        ents.push(new Spring(218 * T, 18 * T, -16)); // spring into the pit gauntlet
+        ents.push(new Spring(243 * T, 18 * T, -15));
+        ents.push(new Spring(270 * T, 8 * T, -14));  // up to temple bonus ring
+        ents.push(new Spring(308 * T, 18 * T, -14));
+
+        // Checkpoint — mid-run at the top of the climbing tower area
+        ents.push(new Checkpoint(160 * T, 18 * T));
+
+        // Goal
+        ents.push(new GoalPost(320 * T, 18 * T));
+
+        // Decorations — classical columns dressing the temple plateau
+        const decs = this.decorations;
+        [20, 25, 75, 80, 125, 175, 200, 245, 275, 282, 289, 296, 315].forEach(dx => {
+            decs.push({ type: 'pillar', x: dx * T, y: ground(dx) * T });
+        });
+
+        this.level = {
+            width: W, height: H, tiles, theme,
+            playerStart,
+            bgMusic: {
+                tempo: 135,
+                melody: [
+                    784, 0, 880, 0, 988, 0, 880, 0,
+                    784, 0, 659, 0, 587, 494, 440, 0,
+                    523, 0, 587, 0, 659, 0, 784, 0,
+                    659, 0, 587, 0, 494, 0, 523, 0,
+                ],
+                bass: [
+                    98, 0, 98, 0, 131, 0, 131, 0,
+                    98, 0, 98, 0, 110, 0, 98, 0,
+                    87, 0, 87, 0, 110, 0, 131, 0,
+                    110, 0, 98, 0, 82, 0, 87, 0,
+                ]
+            }
+        };
+
+        Camera.bounds = {
+            minX: 0, minY: 0,
+            maxX: W * T, maxY: H * T
+        };
+
+        return this.level;
+    },
+
     // Helper: create a horizontal line of ring positions
     _ringLine(startX, y, count, spacing) {
         const rings = [];
@@ -1044,6 +1273,23 @@ const World = {
         return t === TILE.SOLID || t === TILE.FILL;
     },
 
+    // Find the top Y of the first solid tile at or below a world-space point.
+    // Used by enemies/flyers to project accurate blob shadows onto terrain.
+    // Returns the world Y of the tile top, or null if nothing solid found.
+    groundYBelow(worldX, worldY, maxTiles) {
+        const T = CFG.TILE;
+        const tx = Math.floor(worldX / T);
+        const startTy = Math.max(0, Math.floor(worldY / T));
+        const limit = Math.min(this.level ? this.level.height : 0, startTy + (maxTiles || 48));
+        for (let ty = startTy; ty < limit; ty++) {
+            const tile = this.getTile(tx, ty);
+            if (tile === TILE.SOLID || tile === TILE.FILL) {
+                return ty * T;
+            }
+        }
+        return null;
+    },
+
     // Update all entities
     update() {
         this.entities.forEach(e => { if (e.active) e.update(); });
@@ -1117,10 +1363,13 @@ const World = {
     // Draw decorations
     drawDecorations(ctx) {
         this.decorations.forEach(d => {
-            if (Camera.visible(d.x - 30, d.y - 60, 60, 60)) {
+            // Pillars are taller than the other decorations; widen the cull
+            // box a bit so their capitals don't pop in near the top of screen.
+            if (Camera.visible(d.x - 30, d.y - 80, 60, 80)) {
                 if (d.type === 'tree') GFX.drawTree(ctx, Camera.screenX(d.x), Camera.screenY(d.y));
                 if (d.type === 'flower') GFX.drawFlower(ctx, Camera.screenX(d.x), Camera.screenY(d.y), d.color);
                 if (d.type === 'factory') GFX.drawFactory(ctx, Camera.screenX(d.x), Camera.screenY(d.y));
+                if (d.type === 'pillar') GFX.drawPillar(ctx, Camera.screenX(d.x), Camera.screenY(d.y));
             }
         });
     },
