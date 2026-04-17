@@ -695,7 +695,7 @@ const Player = {
 
                 const runSpeed = Math.max(0.1, speed * 0.08);
                 this.animTimer += runSpeed;
-                const frameCount = this.isFastRunning ? 4 : 6;
+                const frameCount = this.isFastRunning ? 4 : 8;
                 this.animFrame = Math.floor(this.animTimer) % frameCount;
                 this.facing = this.vx > 0 ? 1 : this.vx < 0 ? -1 : this.facing;
                 break;

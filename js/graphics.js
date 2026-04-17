@@ -45,9 +45,12 @@ const GFX = {
         const W = 36, H = 52;
         const BODY_Y = 22;
 
-        // Helper to draw Sonic's body at given params
+        // Helper to draw Sonic's body at given params.
+        // legPhase: 0..2π drives a smooth running cycle. Left and right legs
+        //           are 180° out of phase so exactly one is forward at a time.
+        // armPhase: similar, manually set for non-run poses (idle/skid/hurt).
         const drawBody = (ctx, opts) => {
-            const { lean = 0, crouch = 0, legPhase = 0, armPhase = 0 } = opts;
+            const { lean = 0, crouch = 0, legPhase = 0, armPhase = 0, isRun = false } = opts;
             ctx.save();
             ctx.translate(W / 2, BODY_Y);
             ctx.rotate(lean);
@@ -124,37 +127,53 @@ const GFX = {
             ctx.ellipse(1, -17 + bodyY, 2, 3, -0.3, 0, Math.PI * 2);
             ctx.fill();
 
-            // Legs
-            const legSpread = Math.sin(legPhase) * 8;
-            // Back leg
+            // Legs. For running (isRun=true), each leg uses its own phase
+            // offset by π so one is always forward while the other is back —
+            // every frame is a distinct pose, no duplicate-frame jitter.
+            // For static poses (skid/hurt/idle), fall back to a single
+            // legPhase-driven spread so existing callers still look right.
+            let bxOff, byOff, fxOff, fyOff;
+            if (isRun) {
+                const legY = (phase) => Math.sin(phase) * 4;
+                const legX = (phase) => Math.cos(phase) * 5;
+                bxOff = legX(legPhase + Math.PI);
+                byOff = Math.max(0, legY(legPhase + Math.PI));
+                fxOff = legX(legPhase);
+                fyOff = Math.max(0, legY(legPhase));
+            } else {
+                const legSpread = Math.sin(legPhase) * 8;
+                bxOff = 0;
+                byOff = Math.max(0, -legSpread);
+                fxOff = 0;
+                fyOff = Math.max(0, legSpread);
+            }
+
             ctx.fillStyle = '#FFCC88';
-            ctx.fillRect(-3, 10 + bodyY, 4, 4 + Math.max(0, -legSpread));
-            // Back shoe
+            ctx.fillRect(-3 + bxOff * 0.3, 10 + bodyY, 4, 4 + byOff);
             ctx.fillStyle = '#DD2222';
             ctx.beginPath();
-            ctx.ellipse(-1, 16 + bodyY - Math.min(0, legSpread), 5, 3.5, 0, 0, Math.PI * 2);
+            ctx.ellipse(-1 + bxOff, 16 + bodyY + byOff, 5, 3.5, 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(-5, 15 + bodyY - Math.min(0, legSpread), 6, 1.5);
+            ctx.fillRect(-5 + bxOff, 15 + bodyY + byOff, 6, 1.5);
 
-            // Front leg
             ctx.fillStyle = '#FFCC88';
-            ctx.fillRect(2, 10 + bodyY, 4, 4 + Math.max(0, legSpread));
-            // Front shoe
+            ctx.fillRect(2 + fxOff * 0.3, 10 + bodyY, 4, 4 + fyOff);
             ctx.fillStyle = '#DD2222';
             ctx.beginPath();
-            ctx.ellipse(4, 16 + bodyY + Math.max(0, legSpread), 5, 3.5, 0, 0, Math.PI * 2);
+            ctx.ellipse(4 + fxOff, 16 + bodyY + fyOff, 5, 3.5, 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(0, 15 + bodyY + Math.max(0, legSpread), 6, 1.5);
+            ctx.fillRect(0 + fxOff, 15 + bodyY + fyOff, 6, 1.5);
 
-            // Arm
+            // Arm: during running, swing opposite to front leg. Otherwise use
+            // whatever armPhase the caller supplied (for idle/skid/hurt).
+            const effectiveArmPhase = isRun ? -Math.cos(legPhase) * 0.6 : armPhase;
             ctx.fillStyle = '#FFCC88';
             ctx.save();
             ctx.translate(7, 2 + bodyY);
-            ctx.rotate(armPhase);
+            ctx.rotate(effectiveArmPhase);
             ctx.fillRect(0, -2, 4, 8);
-            // Glove
             ctx.fillStyle = '#FFFFFF';
             ctx.beginPath();
             ctx.arc(2, 8, 3, 0, Math.PI * 2);
@@ -167,14 +186,16 @@ const GFX = {
         // Idle frame
         S.sonicIdle = this._s(W, H, (ctx) => drawBody(ctx, { legPhase: 0, armPhase: 0 }));
 
-        // Run frames (6 frames)
+        // Run frames (8 frames). Using 8 instead of 6 avoids the mirror-image
+        // collapse of sin(π-x)==sin(x) that made the 6-frame cycle have only
+        // 3 unique poses. Each frame now shows a visually distinct stride.
         S.sonicRun = [];
-        for (let i = 0; i < 6; i++) {
-            const phase = (i / 6) * Math.PI * 2;
+        for (let i = 0; i < 8; i++) {
+            const phase = (i / 8) * Math.PI * 2;
             S.sonicRun.push(this._s(W, H, (ctx) => drawBody(ctx, {
                 lean: 0.15,
                 legPhase: phase,
-                armPhase: Math.sin(phase + Math.PI) * 0.5,
+                isRun: true,
             })));
         }
 

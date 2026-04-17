@@ -450,7 +450,7 @@ const Game = {
 
         // Sonic sprite on title
         const sonicBob = Math.sin(this.frameCount * 0.05) * 3;
-        const runFrame = GFX.sprites.sonicRun[Math.floor(this.frameCount * 0.15) % 6];
+        const runFrame = GFX.sprites.sonicRun[Math.floor(this.frameCount * 0.15) % GFX.sprites.sonicRun.length];
         if (runFrame) {
             ctx.drawImage(runFrame, CFG.WIDTH / 2 - 120, CFG.HEIGHT / 2 - 40 + sonicBob, 72, 80);
         }
