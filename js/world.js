@@ -35,27 +35,44 @@ class Ring {
 
     draw(ctx) {
         if (this.collected) {
-            // Sparkle effect
+            // Expanding bright flash when a ring is collected.
             const t = this.collectTimer / 20;
+            const sx = Camera.screenX(this.x);
+            const sy = Camera.screenY(this.y);
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
             ctx.globalAlpha = 1 - t;
-            const spr = GFX.sprites.sparkle;
-            GFX.draw(ctx, spr,
-                Camera.screenX(this.x - 5) + Math.cos(t * 4) * 8,
-                Camera.screenY(this.y - 5) - t * 20);
-            ctx.globalAlpha = 1;
+            GFX.drawGlow(ctx, sx, sy - t * 10, 20 + t * 25,
+                'rgba(255,230,120,0.9)', 1 - t);
+            ctx.restore();
             return;
         }
         const bob = Math.sin(Date.now() * 0.004 + this.bobOffset) * 2;
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y + bob);
+
+        // Soft pulsing golden halo so bloom lights up the environment.
+        const pulse = 0.7 + Math.sin(Date.now() * 0.005 + this.bobOffset) * 0.3;
+        GFX.drawGlow(ctx, sx, sy, 14 + pulse * 4, 'rgba(255,215,80,0.55)', pulse);
+
         const spr = GFX.sprites.ring[Math.floor(this.frame) % 8];
-        GFX.draw(ctx, spr,
-            Camera.screenX(this.x - 10),
-            Camera.screenY(this.y - 10 + bob));
+        GFX.draw(ctx, spr, sx - 10, sy - 10);
     }
 
     collect() {
         if (this.collected) return false;
         this.collected = true;
         this.collectTimer = 0;
+        // Burst of golden sparks at the ring position.
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2;
+            World.addParticle(
+                this.x, this.y,
+                Math.cos(a) * Utils.rand(1, 2.5),
+                Math.sin(a) * Utils.rand(1, 2.5) - 1,
+                18, 'ringburst'
+            );
+        }
         return true;
     }
 
@@ -159,20 +176,29 @@ class Crawler {
 
     draw(ctx) {
         if (this.dead) {
-            // Explosion
+            // Explosion with bloom-friendly additive burst
             const t = this.deadTimer / 30;
+            const sx = Camera.screenX(this.x);
+            const sy = Camera.screenY(this.y - 10 - t * 20);
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
             ctx.globalAlpha = 1 - t;
-            GFX.draw(ctx, GFX.sprites.enemyPop,
-                Camera.screenX(this.x - 20),
-                Camera.screenY(this.y - 20 - t * 20));
-            ctx.globalAlpha = 1;
+            GFX.drawGlow(ctx, sx, sy, 30 + t * 30, 'rgba(255,180,60,0.9)', 1 - t);
+            ctx.drawImage(GFX.sprites.enemyPop, sx - 20, sy - 10);
+            ctx.restore();
             return;
         }
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y);
+
+        // Shadow under the crawler
+        GFX.drawShadow(ctx, sx, sy + 12, 16, 0.4);
+
+        // Antenna light pulse
+        GFX.drawGlow(ctx, sx + 6, sy - 22, 8, 'rgba(255,255,120,0.6)', 0.9);
+
         const spr = GFX.sprites.crawler[Math.floor(this.frame)];
-        GFX.draw(ctx, spr,
-            Camera.screenX(this.x - 16),
-            Camera.screenY(this.y - 14),
-            this.vx < 0);
+        GFX.draw(ctx, spr, sx - 16, sy - 14, this.vx < 0);
     }
 
     destroy() {
@@ -223,18 +249,31 @@ class Flyer {
     draw(ctx) {
         if (this.dead) {
             const t = this.deadTimer / 40;
+            const sx = Camera.screenX(this.x);
+            const sy = Camera.screenY(this.y);
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
             ctx.globalAlpha = 1 - t;
-            GFX.draw(ctx, GFX.sprites.enemyPop,
-                Camera.screenX(this.x - 20),
-                Camera.screenY(this.y - 20));
-            ctx.globalAlpha = 1;
+            GFX.drawGlow(ctx, sx, sy - 10, 32, 'rgba(255,160,60,0.9)', 1 - t);
+            ctx.drawImage(GFX.sprites.enemyPop, sx - 20, sy - 20);
+            ctx.restore();
             return;
         }
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y);
+
+        // Drop a blurry shadow on the ground below the flyer based on height
+        // above terrain (approximated via startY).
+        const shadowFall = 12;
+        const shadowScreenY = Camera.screenY(this.startY + shadowFall);
+        GFX.drawShadow(ctx, sx, shadowScreenY, 14, 0.25);
+
+        // Red eye glow
+        const eyeOffset = this.vx < 0 ? -7 : 7;
+        GFX.drawGlow(ctx, sx + eyeOffset, sy - 2, 10, 'rgba(255,60,60,0.8)', 1);
+
         const spr = GFX.sprites.flyer[Math.floor(this.frame)];
-        GFX.draw(ctx, spr,
-            Camera.screenX(this.x - 18),
-            Camera.screenY(this.y - 15),
-            this.vx < 0);
+        GFX.draw(ctx, spr, sx - 18, sy - 15, this.vx < 0);
     }
 
     destroy() {
@@ -270,14 +309,28 @@ class Spring {
 
     draw(ctx) {
         const spr = this.bouncing ? GFX.sprites.springBounce : GFX.sprites.springNormal;
-        GFX.draw(ctx, spr,
-            Camera.screenX(this.x - 12),
-            Camera.screenY(this.y - (this.bouncing ? 28 : 24)));
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y);
+
+        // Faint idle glow + bright burst while triggered.
+        if (this.bouncing) {
+            const t = 1 - (this.bounceTimer / 15);
+            GFX.drawGlow(ctx, sx, sy - 12, 42, 'rgba(255,220,80,0.8)', t);
+        } else {
+            GFX.drawGlow(ctx, sx, sy - 10, 20, 'rgba(255,220,80,0.35)', 1);
+        }
+
+        GFX.draw(ctx, spr, sx - 12, sy - (this.bouncing ? 28 : 24));
     }
 
     trigger() {
         this.bouncing = true;
         this.bounceTimer = 0;
+        // Burst of upward sparks when Sonic hits the spring.
+        for (let i = 0; i < 8; i++) {
+            World.addParticle(this.x + Utils.rand(-10, 10), this.y - 20,
+                Utils.rand(-2, 2), Utils.rand(-4, -1), 18, 'spark');
+        }
     }
 
     getBounds() {
@@ -291,25 +344,43 @@ class Checkpoint {
         this.active = true;
         this.activated = false;
         this.frame = 0;
+        this.activationTimer = 0;
     }
 
     update() {
         if (this.activated) {
             this.frame = (this.frame + 0.08) % 2;
+            if (this.activationTimer < 60) this.activationTimer++;
         }
     }
 
     draw(ctx) {
         const sprites = this.activated ? GFX.sprites.checkpointActive : GFX.sprites.checkpoint;
         const spr = sprites[Math.floor(this.frame) % 2];
-        GFX.draw(ctx, spr,
-            Camera.screenX(this.x - 8),
-            Camera.screenY(this.y - 40));
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y - 8);
+
+        // Pulsing red glow once activated, subtle blue glow while idle.
+        if (this.activated) {
+            const pulse = 0.6 + Math.sin(Date.now() * 0.008) * 0.4;
+            GFX.drawGlow(ctx, sx, sy, 30 + pulse * 8, 'rgba(255,120,80,0.85)', pulse);
+
+            // Burst of sparks right after activation.
+            if (this.activationTimer < 30 && (this.activationTimer & 1) === 0) {
+                World.addParticle(this.x + Utils.rand(-8, 8), this.y - 8,
+                    Utils.rand(-2, 2), Utils.rand(-3, -1), 25, 'spark');
+            }
+        } else {
+            GFX.drawGlow(ctx, sx, sy, 16, 'rgba(100,150,255,0.35)', 1);
+        }
+
+        GFX.draw(ctx, spr, sx - 8, Camera.screenY(this.y - 40));
     }
 
     trigger() {
         if (!this.activated) {
             this.activated = true;
+            this.activationTimer = 0;
             Sound.checkpoint();
             return true;
         }
@@ -327,23 +398,58 @@ class GoalPost {
         this.active = true;
         this.spinning = false;
         this.frame = 0;
+        this.spinTimer = 0;
     }
 
     update() {
         if (this.spinning) {
-            this.frame = (this.frame + 0.15) % 4;
+            this.frame = (this.frame + 0.25) % 4;
+            this.spinTimer++;
         }
     }
 
     draw(ctx) {
         const spr = GFX.sprites.goalSign[Math.floor(this.frame) % 4];
-        GFX.draw(ctx, spr,
-            Camera.screenX(this.x - 16),
-            Camera.screenY(this.y - 48));
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y - 24);
+
+        // Always-on pedestal glow, gets way brighter while spinning.
+        const baseGlow = this.spinning ? 0.9 : 0.35;
+        GFX.drawGlow(ctx, sx, sy, 42, 'rgba(255,220,80,0.9)', baseGlow);
+
+        // Rotating light rays behind the sign while spinning.
+        if (this.spinning) {
+            const t = this.spinTimer;
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.translate(sx, sy);
+            ctx.rotate(t * 0.08);
+            const rayGrad = ctx.createLinearGradient(-80, 0, 80, 0);
+            rayGrad.addColorStop(0, 'rgba(255,240,120,0)');
+            rayGrad.addColorStop(0.5, 'rgba(255,240,120,0.4)');
+            rayGrad.addColorStop(1, 'rgba(255,240,120,0)');
+            ctx.fillStyle = rayGrad;
+            for (let r = 0; r < 4; r++) {
+                ctx.save();
+                ctx.rotate(r * Math.PI / 4);
+                ctx.fillRect(-90, -4, 180, 8);
+                ctx.restore();
+            }
+            ctx.restore();
+
+            // Ambient sparkles
+            if ((this.spinTimer & 3) === 0) {
+                World.addParticle(this.x + Utils.rand(-24, 24), this.y - 24 + Utils.rand(-20, 20),
+                    Utils.rand(-1, 1), Utils.rand(-1, 1), 40, 'sparkle');
+            }
+        }
+
+        GFX.draw(ctx, spr, sx - 16, Camera.screenY(this.y - 48));
     }
 
     trigger() {
         this.spinning = true;
+        this.spinTimer = 0;
     }
 
     getBounds() {
@@ -377,7 +483,18 @@ class Popup {
     }
 }
 
-// Dust particle
+// Particles are purely visual effects. The sprite name selects a
+// behaviour profile (gravity, blend mode) so one class covers dust,
+// sparks, speed lines, embers, and more without subclass explosion.
+const PARTICLE_PROFILES = {
+    dust:      { gravity: 0.1,  friction: 0.98, blend: 'source-over', growth: 1.0 },
+    sparkle:   { gravity: 0.05, friction: 0.96, blend: 'lighter',     growth: 0.8 },
+    spark:     { gravity: 0.15, friction: 0.95, blend: 'lighter',     growth: 1.2 },
+    ember:     { gravity: -0.04, friction: 0.99, blend: 'lighter',    growth: 0.9 }, // rises
+    speedline: { gravity: 0,    friction: 0.92, blend: 'lighter',     growth: 1.0 },
+    ringburst: { gravity: 0.04, friction: 0.92, blend: 'lighter',     growth: 1.0 },
+};
+
 class Particle {
     constructor(x, y, vx, vy, life, sprite) {
         this.x = x; this.y = y;
@@ -386,29 +503,47 @@ class Particle {
         this.maxLife = this.life;
         this.active = true;
         this.sprite = sprite || 'dust';
+        this.rot = 0;
+        this.rotVel = 0;
     }
 
     update() {
+        const p = PARTICLE_PROFILES[this.sprite] || PARTICLE_PROFILES.dust;
         this.x += this.vx;
         this.y += this.vy;
-        this.vy += 0.1;
-        this.vx *= 0.98;
+        this.vy += p.gravity;
+        this.vx *= p.friction;
+        this.rot += this.rotVel;
         this.life--;
         if (this.life <= 0) this.active = false;
     }
 
     draw(ctx) {
+        const p = PARTICLE_PROFILES[this.sprite] || PARTICLE_PROFILES.dust;
         const t = this.life / this.maxLife;
-        ctx.globalAlpha = t;
         const spr = GFX.sprites[this.sprite];
-        if (spr) {
-            const scale = 0.5 + t * 0.5;
-            ctx.drawImage(spr,
-                Camera.screenX(this.x) - spr.width * scale / 2,
-                Camera.screenY(this.y) - spr.height * scale / 2,
-                spr.width * scale, spr.height * scale);
+        if (!spr) return;
+
+        const prev = ctx.globalCompositeOperation;
+        ctx.globalCompositeOperation = p.blend;
+        ctx.globalAlpha = t;
+        const scale = (0.5 + t * 0.5) * p.growth;
+        const w = spr.width * scale;
+        const h = spr.height * scale;
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y);
+
+        if (this.rot !== 0) {
+            ctx.save();
+            ctx.translate(sx, sy);
+            ctx.rotate(this.rot);
+            ctx.drawImage(spr, -w / 2, -h / 2, w, h);
+            ctx.restore();
+        } else {
+            ctx.drawImage(spr, sx - w / 2, sy - h / 2, w, h);
         }
         ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = prev;
     }
 }
 

@@ -13,6 +13,14 @@ const Game = {
     accumulator: 0,
     TIMESTEP: 1000 / 60, // 60 FPS fixed timestep
 
+    // Hit-pause freezes simulation for a few frames on impactful events
+    // (enemy destroy, taking damage). Rendering still runs, so the player
+    // gets a satisfying micro-freeze that sells the impact.
+    hitPauseFrames: 0,
+    triggerHitPause(frames) {
+        this.hitPauseFrames = Math.max(this.hitPauseFrames, frames);
+    },
+
     // Level complete tally
     tally: {
         active: false,
@@ -157,6 +165,13 @@ const Game = {
         if (Input.pressed('Escape') || Input.pressed('KeyP')) {
             this.state = 'paused';
             Sound.stopMusic();
+            return;
+        }
+
+        // Hit-pause: skip simulation tick while the freeze is active, but
+        // still allow camera shake / post-fx decay to tick via render.
+        if (this.hitPauseFrames > 0) {
+            this.hitPauseFrames--;
             return;
         }
 
@@ -358,9 +373,15 @@ const Game = {
     },
 
     // ---- RENDER ----
+    // Pipeline: draw the scene into PostFX.fbo, composite back to the main
+    // canvas with post-effects, then overlay UI (HUD / pause / transitions)
+    // on the main canvas so text stays crisp.
     render() {
-        const ctx = this.ctx;
-        ctx.clearRect(0, 0, CFG.WIDTH, CFG.HEIGHT);
+        const mainCtx = this.ctx;
+        mainCtx.setTransform(1, 0, 0, 1, 0, 0);
+        mainCtx.clearRect(0, 0, CFG.WIDTH, CFG.HEIGHT);
+
+        const ctx = PostFX.beginFrame();
 
         switch (this.state) {
             case 'loading':
@@ -371,12 +392,8 @@ const Game = {
                 break;
             case 'playing':
             case 'paused':
-                this.drawGameplay(ctx);
-                if (this.state === 'paused') this.drawPauseOverlay(ctx);
-                break;
             case 'levelComplete':
                 this.drawGameplay(ctx);
-                this.drawLevelComplete(ctx);
                 break;
             case 'gameOver':
                 this.drawGameOver(ctx);
@@ -386,8 +403,16 @@ const Game = {
                 break;
         }
 
-        // Draw transition overlay
-        this.drawTransition(ctx);
+        PostFX.endFrame(mainCtx);
+
+        // UI overlays (crisp, outside the post-fx path)
+        if (this.state === 'playing' || this.state === 'paused' || this.state === 'levelComplete') {
+            this.drawHUD(mainCtx);
+        }
+        if (this.state === 'paused') this.drawPauseOverlay(mainCtx);
+        if (this.state === 'levelComplete') this.drawLevelComplete(mainCtx);
+
+        this.drawTransition(mainCtx);
     },
 
     // ---- SCREEN RENDERERS ----
@@ -516,8 +541,7 @@ const Game = {
         // Particles (on top)
         World.drawParticles(ctx);
 
-        // HUD
-        this.drawHUD(ctx);
+        // HUD is rendered by Game.render() on the main canvas for crispness.
     },
 
     drawHUD(ctx) {

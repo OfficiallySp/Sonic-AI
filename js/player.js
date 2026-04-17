@@ -41,6 +41,10 @@ const Player = {
     checkpointY: 0,
     hasCheckpoint: false,
 
+    // Afterimage trail (enabled at high speed)
+    trail: [],
+    TRAIL_MAX: 8,
+
     // Get current hitbox width/height
     get w() {
         return (this.state === 'rolling' || this.state === 'spindash' || this.state === 'jumping')
@@ -84,6 +88,7 @@ const Player = {
         this.checkpointX = spawnX;
         this.checkpointY = spawnY;
         this.hasCheckpoint = false;
+        this.trail = [];
     },
 
     // Respawn at checkpoint or start
@@ -179,6 +184,41 @@ const Player = {
 
         // Update animation
         this.updateAnimation();
+
+        // Record afterimage trail at high speed
+        this._updateTrail();
+    },
+
+    // Record one snapshot per frame when moving fast enough to show
+    // an afterimage trail. The drawer replays these with fading alpha.
+    _updateTrail() {
+        const speed = Math.abs(this.vx);
+        const ballState = this.state === 'rolling' || this.state === 'jumping' || this.state === 'spring';
+        const fastEnough = speed > 5 || (ballState && speed > 3);
+
+        if (fastEnough && this.state !== 'dead' && this.state !== 'hurt') {
+            this.trail.push({
+                x: this.x,
+                y: this.y,
+                state: this.state,
+                animFrame: this.animFrame,
+                facing: this.facing,
+                isFastRunning: this.isFastRunning,
+            });
+            if (this.trail.length > this.TRAIL_MAX) this.trail.shift();
+
+            // Emit speed-line dust streaks behind Sonic at very high speed.
+            if (speed > 6 && this.grounded && (this.time & 1) === 0) {
+                World.addParticle(
+                    this.x - this.facing * 14 + Utils.rand(-3, 3),
+                    this.y - Utils.rand(4, 22),
+                    -this.facing * Utils.rand(2, 4), Utils.rand(-0.5, 0.5),
+                    12, 'speedline'
+                );
+            }
+        } else if (this.trail.length > 0) {
+            this.trail.shift();
+        }
     },
 
     // ---- STATE UPDATES ----
@@ -540,6 +580,7 @@ const Player = {
                         this.lives++;
                         Sound.oneUp();
                         World.addPopup(this.x, this.y - 40, '1UP!', '#44FF44');
+                        PostFX.flash('rgba(120,255,120,0.4)', 0.6);
                     }
                 }
                 return;
@@ -621,11 +662,23 @@ const Player = {
         this.score += CFG.ENEMY_VALUE;
         Sound.enemyPop();
         World.addPopup(enemy.x, enemy.y - 10, '+100', '#FFFFFF');
-        // Release sparkles
+
+        // Release sparks + sparkles for big impact feel
         for (let i = 0; i < 6; i++) {
             World.addParticle(enemy.x + Utils.rand(-10, 10), enemy.y + Utils.rand(-10, 10),
                 Utils.rand(-2, 2), Utils.rand(-3, -1), 25, 'sparkle');
         }
+        for (let i = 0; i < 8; i++) {
+            const a = Utils.rand(0, Math.PI * 2);
+            World.addParticle(enemy.x, enemy.y - 8,
+                Math.cos(a) * Utils.rand(2, 4),
+                Math.sin(a) * Utils.rand(2, 4),
+                20, 'spark');
+        }
+
+        // Hit-pause + shake for punchy feedback (no full-screen flash)
+        if (typeof Game !== 'undefined') Game.triggerHitPause(3);
+        Camera.shake(3, 6);
     },
 
     takeDamage(source) {
@@ -651,6 +704,11 @@ const Player = {
         this.controlLock = 30;
         Camera.shake(5, 10);
         Sound.hurt();
+
+        // Screen feedback: red flash + damage vignette + hit-pause
+        PostFX.flash('rgba(255,60,60,0.4)', 0.6);
+        PostFX.triggerDamageVignette(1.0);
+        if (typeof Game !== 'undefined') Game.triggerHitPause(5);
     },
 
     die() {
@@ -728,11 +786,27 @@ const Player = {
 
     // ---- DRAW ----
     draw(ctx) {
-        if (this.invincibleFlash) return; // Blink effect
-
         const S = GFX.sprites;
         const sx = Camera.screenX(this.x);
         const sy = Camera.screenY(this.y);
+
+        // Blob shadow - drawn before the invincibility blink check so it
+        // doesn't flicker with the sprite on hit. Uses coyoteTimer as a grace
+        // window so 1-frame grounded dropouts on slopes/tile seams don't blink
+        // the shadow out during normal running.
+        const onOrNearGround = this.grounded || this.coyoteTimer > 0;
+        const shadowStateOk = this.state !== 'dead' && this.state !== 'hurt' &&
+            this.state !== 'jumping' && this.state !== 'spring';
+        if (onOrNearGround && shadowStateOk) {
+            GFX.drawShadow(ctx, sx, sy - 1, 14, 0.35);
+        }
+
+        if (this.invincibleFlash) return; // Blink effect for rest of sprite
+
+        // Afterimage trail (drawn behind the live sprite, oldest first).
+        // Uses additive blending with a cyan tint so it reads as "speed glow".
+        this._drawTrail(ctx);
+
         const flip = this.facing < 0;
         let sprite = null;
         let offX = -18, offY = -40; // Sprite offset from bottom-center
@@ -803,5 +877,42 @@ const Player = {
         // const b = this.getBounds();
         // ctx.strokeStyle = 'rgba(255,0,0,0.5)';
         // ctx.strokeRect(Camera.screenX(b.x), Camera.screenY(b.y), b.w, b.h);
+    },
+
+    // Pick the sprite that matches a trail snapshot's visual state.
+    _spriteForSnapshot(snap) {
+        const S = GFX.sprites;
+        switch (snap.state) {
+            case 'rolling':
+            case 'jumping':
+                return { spr: S.sonicBall[snap.animFrame % S.sonicBall.length], offX: -14, offY: -28 };
+            case 'spring':
+                return { spr: S.sonicIdle, offX: -18, offY: -40 };
+            case 'running':
+                if (snap.isFastRunning) {
+                    return { spr: S.sonicFastRun[snap.animFrame % S.sonicFastRun.length], offX: -18, offY: -40 };
+                }
+                return { spr: S.sonicRun[snap.animFrame % S.sonicRun.length], offX: -18, offY: -40 };
+            default:
+                return { spr: S.sonicIdle, offX: -18, offY: -40 };
+        }
+    },
+
+    _drawTrail(ctx) {
+        if (!this.trail.length) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < this.trail.length; i++) {
+            const snap = this.trail[i];
+            const { spr, offX, offY } = this._spriteForSnapshot(snap);
+            if (!spr) continue;
+            const t = (i + 1) / this.trail.length;  // 0..1 (newer = higher)
+            ctx.globalAlpha = 0.18 * t;
+            GFX.draw(ctx, spr,
+                Camera.screenX(snap.x) + offX,
+                Camera.screenY(snap.y) + offY,
+                snap.facing < 0);
+        }
+        ctx.restore();
     }
 };

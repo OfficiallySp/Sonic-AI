@@ -14,6 +14,7 @@ const GFX = {
         this.genItems();
         this.genTiles();
         this.genParticles();
+        PostFX.init();
     },
 
     // Create an offscreen canvas sprite
@@ -784,21 +785,67 @@ const GFX = {
     genParticles() {
         const S = this.sprites;
 
-        // Dust puff
-        S.dust = this._s(12, 12, (ctx) => {
-            ctx.fillStyle = 'rgba(200,180,150,0.5)';
-            ctx.beginPath();
-            ctx.arc(6, 6, 5, 0, Math.PI * 2);
-            ctx.fill();
+        // Dust puff (soft, slightly glowy so bloom picks it up)
+        S.dust = this._s(14, 14, (ctx) => {
+            const g = ctx.createRadialGradient(7, 7, 0, 7, 7, 7);
+            g.addColorStop(0, 'rgba(240,220,190,0.85)');
+            g.addColorStop(0.6, 'rgba(200,180,150,0.4)');
+            g.addColorStop(1, 'rgba(200,180,150,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 14, 14);
         });
 
-        // Sparkle
-        S.sparkle = this._s(10, 10, (ctx) => {
+        // Sparkle (cross with bright core - reads great with bloom)
+        S.sparkle = this._s(12, 12, (ctx) => {
+            const g = ctx.createRadialGradient(6, 6, 0, 6, 6, 6);
+            g.addColorStop(0, 'rgba(255,255,255,1)');
+            g.addColorStop(0.5, 'rgba(255,240,120,0.7)');
+            g.addColorStop(1, 'rgba(255,240,120,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 12, 12);
             ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(4, 0, 2, 10);
-            ctx.fillRect(0, 4, 10, 2);
-            ctx.fillStyle = '#FFFF88';
-            ctx.fillRect(3, 3, 4, 4);
+            ctx.fillRect(5, 0, 2, 12);
+            ctx.fillRect(0, 5, 12, 2);
+        });
+
+        // Horizontal speed line streak (used behind fast-running Sonic)
+        S.speedline = this._s(24, 4, (ctx) => {
+            const g = ctx.createLinearGradient(0, 2, 24, 2);
+            g.addColorStop(0, 'rgba(180,220,255,0)');
+            g.addColorStop(0.5, 'rgba(200,240,255,0.9)');
+            g.addColorStop(1, 'rgba(180,220,255,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 1, 24, 2);
+        });
+
+        // Bright star spark (for enemy destroy / ring collection)
+        S.spark = this._s(14, 14, (ctx) => {
+            const g = ctx.createRadialGradient(7, 7, 0, 7, 7, 7);
+            g.addColorStop(0, 'rgba(255,255,255,1)');
+            g.addColorStop(0.4, 'rgba(255,200,100,0.8)');
+            g.addColorStop(1, 'rgba(255,120,30,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 14, 14);
+        });
+
+        // Small hot ember (factory theme ambient)
+        S.ember = this._s(8, 8, (ctx) => {
+            const g = ctx.createRadialGradient(4, 4, 0, 4, 4, 4);
+            g.addColorStop(0, 'rgba(255,220,150,1)');
+            g.addColorStop(0.5, 'rgba(255,120,40,0.7)');
+            g.addColorStop(1, 'rgba(255,60,20,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 8, 8);
+        });
+
+        // Ring burst shard (bright gold flash when collecting a ring)
+        S.ringburst = this._s(10, 10, (ctx) => {
+            const g = ctx.createRadialGradient(5, 5, 0, 5, 5, 5);
+            g.addColorStop(0, 'rgba(255,255,220,1)');
+            g.addColorStop(0.5, 'rgba(255,215,0,0.9)');
+            g.addColorStop(1, 'rgba(255,215,0,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 10, 10);
         });
 
         // Score popup (100)
@@ -821,32 +868,77 @@ const GFX = {
     // ---- BACKGROUND DRAWING ----
     drawBg(ctx, theme, camX, camY) {
         const w = CFG.WIDTH, h = CFG.HEIGHT;
+        const t = Date.now() * 0.001;
 
         if (theme === 1) {
-            // Emerald Valley - Green Hill style
-            // Sky gradient
+            // ---- EMERALD VALLEY ----
             const grad = ctx.createLinearGradient(0, 0, 0, h);
-            grad.addColorStop(0, '#2277FF');
-            grad.addColorStop(0.5, '#55AAFF');
-            grad.addColorStop(1, '#88CCFF');
+            grad.addColorStop(0, '#1E5FD4');
+            grad.addColorStop(0.35, '#3A9AF4');
+            grad.addColorStop(0.8, '#9FD5FF');
+            grad.addColorStop(1, '#C9EAFF');
             ctx.fillStyle = grad;
             ctx.fillRect(0, 0, w, h);
 
-            // Clouds (parallax)
-            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            // Sun disc with soft bloom-friendly glow
+            const sunX = w * 0.8, sunY = h * 0.2;
+            const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 180);
+            sunGrad.addColorStop(0, 'rgba(255,245,200,0.9)');
+            sunGrad.addColorStop(0.2, 'rgba(255,230,150,0.45)');
+            sunGrad.addColorStop(0.5, 'rgba(255,210,120,0.15)');
+            sunGrad.addColorStop(1, 'rgba(255,200,100,0)');
+            ctx.fillStyle = sunGrad;
+            ctx.fillRect(0, 0, w, h);
+
+            // God rays (rotated beams of light from the sun)
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.translate(sunX, sunY);
+            const rayRot = t * 0.05;
             for (let i = 0; i < 6; i++) {
-                const cx = ((i * 200 + 50) - camX * 0.05) % (w + 200) - 100;
-                const cy = 30 + i * 20 + Math.sin(i * 2) * 15;
+                ctx.save();
+                ctx.rotate(rayRot + i * (Math.PI / 3) + Math.sin(t * 0.3 + i) * 0.05);
+                const rg = ctx.createLinearGradient(0, 0, 400, 0);
+                rg.addColorStop(0, 'rgba(255,240,190,0.25)');
+                rg.addColorStop(1, 'rgba(255,240,190,0)');
+                ctx.fillStyle = rg;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(400, -40);
+                ctx.lineTo(400, 40);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+            ctx.restore();
+
+            // Clouds (parallax)
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            for (let i = 0; i < 8; i++) {
+                const cx = ((i * 180 + 50) - camX * 0.05 + t * 4) % (w + 240) - 120;
+                const cy = 30 + i * 22 + Math.sin(i * 2 + t * 0.2) * 12;
                 ctx.beginPath();
                 ctx.arc(cx, cy, 25, 0, Math.PI * 2);
-                ctx.arc(cx + 20, cy - 5, 20, 0, Math.PI * 2);
-                ctx.arc(cx + 40, cy, 22, 0, Math.PI * 2);
-                ctx.arc(cx + 15, cy + 5, 18, 0, Math.PI * 2);
+                ctx.arc(cx + 22, cy - 6, 22, 0, Math.PI * 2);
+                ctx.arc(cx + 44, cy, 24, 0, Math.PI * 2);
+                ctx.arc(cx + 16, cy + 6, 20, 0, Math.PI * 2);
                 ctx.fill();
             }
 
+            // Distant mountains (very pale, far parallax)
+            ctx.fillStyle = 'rgba(110,140,200,0.55)';
+            ctx.beginPath();
+            ctx.moveTo(0, h);
+            for (let x = 0; x <= w; x += 8) {
+                const hx = (x + camX * 0.05) * 0.006;
+                const hy = h - 260 + Math.sin(hx) * 60 + Math.sin(hx * 3.1) * 30;
+                ctx.lineTo(x, hy);
+            }
+            ctx.lineTo(w, h);
+            ctx.fill();
+
             // Far hills
-            ctx.fillStyle = '#338844';
+            ctx.fillStyle = '#2F7A3E';
             ctx.beginPath();
             ctx.moveTo(0, h);
             for (let x = 0; x <= w; x += 4) {
@@ -881,60 +973,137 @@ const GFX = {
             ctx.lineTo(w, h);
             ctx.fill();
 
-            // Water at bottom
-            ctx.fillStyle = 'rgba(30,100,200,0.3)';
-            ctx.fillRect(0, h - 30, w, 30);
+            // Animated water band at the bottom with waves + shimmer
+            const waterY = h - 30;
+            const waterGrad = ctx.createLinearGradient(0, waterY, 0, h);
+            waterGrad.addColorStop(0, 'rgba(80,160,230,0.55)');
+            waterGrad.addColorStop(1, 'rgba(20,60,140,0.5)');
+            ctx.fillStyle = waterGrad;
+            ctx.fillRect(0, waterY, w, 30);
 
-        } else {
-            // Neon Factory
-            const grad = ctx.createLinearGradient(0, 0, 0, h);
-            grad.addColorStop(0, '#0A0A2E');
-            grad.addColorStop(0.5, '#1A1A4E');
-            grad.addColorStop(1, '#2A1A5E');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, w, h);
-
-            // Stars
-            ctx.fillStyle = '#FFFFFF';
-            for (let i = 0; i < 30; i++) {
-                const sx = (i * 137.5 + Math.sin(i) * 50) % w;
-                const sy = (i * 73.7 + Math.cos(i) * 30) % (h * 0.5);
-                const size = 1 + (i % 3);
-                ctx.globalAlpha = 0.4 + (i % 5) * 0.12;
-                ctx.fillRect(sx, sy, size, size);
-            }
-            ctx.globalAlpha = 1;
-
-            // Industrial background buildings
-            ctx.fillStyle = '#151540';
-            for (let i = 0; i < 8; i++) {
-                const bx = ((i * 150) - camX * 0.08) % (w + 300) - 150;
-                const bh = 100 + (i * 47) % 120;
-                ctx.fillRect(bx, h - bh, 80, bh);
-                // Windows
-                ctx.fillStyle = '#3344AA';
-                for (let wy = h - bh + 10; wy < h - 20; wy += 18) {
-                    for (let wx = bx + 8; wx < bx + 72; wx += 16) {
-                        ctx.fillRect(wx, wy, 8, 8);
-                    }
-                }
-                ctx.fillStyle = '#151540';
-            }
-
-            // Neon pipes
-            ctx.strokeStyle = '#6644CC';
-            ctx.lineWidth = 3;
-            ctx.globalAlpha = 0.4;
-            for (let i = 0; i < 4; i++) {
-                const py = 200 + i * 60 - (camY * 0.1);
+            // Water wave crests (two sine layers)
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+            ctx.lineWidth = 1;
+            for (let row = 0; row < 3; row++) {
                 ctx.beginPath();
-                ctx.moveTo(0, py);
-                for (let x = 0; x <= w; x += 60) {
-                    ctx.lineTo(x + 30, py + Math.sin((x + camX * 0.15) * 0.02) * 20);
+                for (let x = 0; x < w; x += 4) {
+                    const y = waterY + 4 + row * 8 + Math.sin(x * 0.05 + t * 2 + row) * 1.5;
+                    if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                 }
                 ctx.stroke();
             }
-            ctx.globalAlpha = 1;
+
+        } else {
+            // ---- NEON FACTORY ----
+            const grad = ctx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, '#08062A');
+            grad.addColorStop(0.5, '#1A1250');
+            grad.addColorStop(1, '#3A1670');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, w, h);
+
+            // Soft nebula glow blobs (slow-moving ambient color)
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            for (let i = 0; i < 3; i++) {
+                const nx = ((i * 320 + t * 10) % (w + 400)) - 200;
+                const ny = 100 + i * 80 + Math.sin(t * 0.2 + i) * 30;
+                const ng = ctx.createRadialGradient(nx, ny, 0, nx, ny, 220);
+                const hue = i === 0 ? [120, 60, 200] : i === 1 ? [200, 60, 180] : [60, 180, 255];
+                ng.addColorStop(0, `rgba(${hue[0]},${hue[1]},${hue[2]},0.22)`);
+                ng.addColorStop(1, `rgba(${hue[0]},${hue[1]},${hue[2]},0)`);
+                ctx.fillStyle = ng;
+                ctx.fillRect(nx - 220, ny - 220, 440, 440);
+            }
+            ctx.restore();
+
+            // Twinkling stars
+            for (let i = 0; i < 40; i++) {
+                const sx = (i * 137.5 + Math.sin(i) * 50) % w;
+                const sy = (i * 73.7 + Math.cos(i) * 30) % (h * 0.5);
+                const size = 1 + (i % 3);
+                const twinkle = 0.3 + Math.abs(Math.sin(t * 2 + i * 0.7)) * 0.7;
+                ctx.fillStyle = `rgba(255,255,255,${twinkle * 0.6})`;
+                ctx.fillRect(sx, sy, size, size);
+            }
+
+            // Industrial silhouettes - far layer
+            ctx.fillStyle = '#0B0A2A';
+            for (let i = 0; i < 10; i++) {
+                const bx = ((i * 140) - camX * 0.05) % (w + 280) - 140;
+                const bh = 80 + (i * 43) % 100;
+                ctx.fillRect(bx, h - bh, 70, bh);
+            }
+
+            // Industrial silhouettes - mid layer with windows
+            for (let i = 0; i < 8; i++) {
+                const bx = ((i * 170) - camX * 0.12) % (w + 340) - 170;
+                const bh = 120 + (i * 59) % 120;
+                ctx.fillStyle = '#161040';
+                ctx.fillRect(bx, h - bh, 90, bh);
+
+                // Pulsing windows
+                const winPulse = 0.5 + Math.sin(t * 3 + i) * 0.5;
+                for (let wy = h - bh + 12; wy < h - 20; wy += 18) {
+                    for (let wx = bx + 8; wx < bx + 82; wx += 16) {
+                        const on = ((wx + wy) * 7 + i) % 5 !== 0;
+                        if (on) {
+                            ctx.fillStyle = `rgba(80,130,255,${0.5 + winPulse * 0.5})`;
+                            ctx.fillRect(wx, wy, 8, 8);
+                        }
+                    }
+                }
+
+                // Tall antenna with blinking light
+                if (i % 3 === 0) {
+                    ctx.fillStyle = '#2A2A60';
+                    ctx.fillRect(bx + 44, h - bh - 20, 2, 22);
+                    if (Math.sin(t * 4 + i) > 0) {
+                        ctx.fillStyle = '#FF4060';
+                        ctx.beginPath();
+                        ctx.arc(bx + 45, h - bh - 22, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // Neon pipes (with animated glow)
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            for (let i = 0; i < 4; i++) {
+                const py = 200 + i * 60 - (camY * 0.1);
+                const hue = ['#6644FF', '#FF44AA', '#44AAFF', '#66FFAA'][i];
+                // Outer glow pass
+                ctx.strokeStyle = hue;
+                ctx.globalAlpha = 0.15;
+                ctx.lineWidth = 10;
+                ctx.beginPath();
+                ctx.moveTo(0, py);
+                for (let x = 0; x <= w; x += 30) {
+                    ctx.lineTo(x + 15, py + Math.sin((x + camX * 0.15 + t * 30) * 0.02) * 20);
+                }
+                ctx.stroke();
+                // Core pass
+                ctx.globalAlpha = 0.8;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(0, py);
+                for (let x = 0; x <= w; x += 30) {
+                    ctx.lineTo(x + 15, py + Math.sin((x + camX * 0.15 + t * 30) * 0.02) * 20);
+                }
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // Ambient embers spawn (visual only)
+            if (Math.random() < 0.15 && typeof World !== 'undefined' && World.level) {
+                World.addParticle(
+                    Camera.x + Math.random() * w,
+                    Camera.y + h - Math.random() * 40,
+                    Utils.rand(-0.3, 0.3), Utils.rand(-1.5, -0.5),
+                    80 + Math.random() * 40, 'ember'
+                );
+            }
         }
     },
 
@@ -982,14 +1151,288 @@ const GFX = {
         ctx.fillRect(x, y - 30, 20, 30);
         ctx.fillStyle = '#5A5A8A';
         ctx.fillRect(x + 2, y - 28, 16, 4);
-        // Light
-        ctx.fillStyle = '#FF4444';
+        // Light (pulsing)
+        const pulse = 0.7 + Math.sin(Date.now() * 0.005 + x * 0.01) * 0.3;
+        ctx.fillStyle = `rgba(255,${60 + pulse * 30},${60 + pulse * 30},1)`;
         ctx.beginPath();
         ctx.arc(x + 10, y - 35, 4, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = 'rgba(255,60,60,0.3)';
+        ctx.fillStyle = `rgba(255,80,80,${0.2 + pulse * 0.2})`;
         ctx.beginPath();
-        ctx.arc(x + 10, y - 35, 8, 0, Math.PI * 2);
+        ctx.arc(x + 10, y - 35, 10 + pulse * 3, 0, Math.PI * 2);
         ctx.fill();
+    },
+
+    // ============================================================
+    // Draw a soft elliptical blob shadow below an entity (multiply).
+    // Makes sprites feel grounded without needing real shadow casting.
+    // ============================================================
+    drawShadow(ctx, screenX, screenY, width, opacity) {
+        const op = opacity == null ? 0.35 : opacity;
+        const grad = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, width);
+        grad.addColorStop(0, `rgba(0,0,0,${op})`);
+        grad.addColorStop(0.7, `rgba(0,0,0,${op * 0.5})`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(screenX, screenY, width, width * 0.35, 0, 0, Math.PI * 2);
+        ctx.fill();
+    },
+
+    // ============================================================
+    // Draw a soft radial glow (additive). Used for lighting passes.
+    // color: any rgb / rgba / hex string; intensity: 0..1+ multiplier.
+    // ============================================================
+    drawGlow(ctx, x, y, radius, color, intensity) {
+        const i = intensity == null ? 1 : intensity;
+        const [r, g, b, a] = this._parseColor(color);
+        const alpha = Math.max(0, Math.min(1, a * i));
+
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        grad.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
+        grad.addColorStop(0.5, `rgba(${r},${g},${b},${alpha * 0.35})`);
+        grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+
+        const prev = ctx.globalCompositeOperation;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = prev;
+    },
+
+    // Parse '#rgb', '#rrggbb', 'rgb(r,g,b)', 'rgba(r,g,b,a)' into [r,g,b,a].
+    _parseColor(c) {
+        if (c[0] === '#') {
+            const hex = c.slice(1);
+            if (hex.length === 3) {
+                return [
+                    parseInt(hex[0] + hex[0], 16),
+                    parseInt(hex[1] + hex[1], 16),
+                    parseInt(hex[2] + hex[2], 16),
+                    1
+                ];
+            }
+            return [
+                parseInt(hex.slice(0, 2), 16),
+                parseInt(hex.slice(2, 4), 16),
+                parseInt(hex.slice(4, 6), 16),
+                1
+            ];
+        }
+        const m = c.match(/rgba?\(([^)]+)\)/);
+        if (m) {
+            const parts = m[1].split(',').map(s => parseFloat(s.trim()));
+            return [parts[0] | 0, parts[1] | 0, parts[2] | 0, parts.length > 3 ? parts[3] : 1];
+        }
+        return [255, 255, 255, 1];
+    }
+};
+
+// ============================================================
+// POST-PROCESSING PIPELINE
+// Renders gameplay to an offscreen framebuffer then composites
+// to the main canvas with bloom, vignette, color grading,
+// subtle scanlines and chromatic-fringe effects.
+// ============================================================
+const PostFX = {
+    enabled: true,
+    bloomEnabled: true,
+    vignetteEnabled: true,
+    scanlinesEnabled: true,
+    grainEnabled: true,
+
+    fbo: null,         // full-res offscreen buffer (gameplay target)
+    fboCtx: null,
+    bloomA: null, bloomACtx: null,  // half-res for bright-pass + blur
+    bloomB: null, bloomBCtx: null,  // quarter-res for wide blur
+    scanlinePattern: null,
+    grainBuffer: null,
+    grainFrame: 0,
+
+    // Dynamic effects (set by gameplay code per frame)
+    flashColor: null,   // e.g. 'rgba(255,40,40,0.4)' for hurt
+    flashAlpha: 0,
+    damageVignette: 0,  // 0..1 extra red vignette on damage
+
+    init() {
+        this.fbo = document.createElement('canvas');
+        this.fbo.width = CFG.WIDTH;
+        this.fbo.height = CFG.HEIGHT;
+        this.fboCtx = this.fbo.getContext('2d');
+
+        this.bloomA = document.createElement('canvas');
+        this.bloomA.width = Math.floor(CFG.WIDTH / 2);
+        this.bloomA.height = Math.floor(CFG.HEIGHT / 2);
+        this.bloomACtx = this.bloomA.getContext('2d');
+
+        this.bloomB = document.createElement('canvas');
+        this.bloomB.width = Math.floor(CFG.WIDTH / 4);
+        this.bloomB.height = Math.floor(CFG.HEIGHT / 4);
+        this.bloomBCtx = this.bloomB.getContext('2d');
+
+        // Feature-detect canvas filter; if missing, disable bloom to avoid
+        // a no-op blur that still costs perf.
+        const test = document.createElement('canvas').getContext('2d');
+        if (typeof test.filter === 'undefined') {
+            this.bloomEnabled = false;
+        }
+
+        this._buildScanlines();
+        this._buildGrain();
+    },
+
+    // Subtle CRT-style scanline pattern. Every other row is slightly darker.
+    // Very low opacity so it reads as a hint of CRT softness, not heavy bars.
+    _buildScanlines() {
+        const c = document.createElement('canvas');
+        c.width = 2; c.height = 4;
+        const x = c.getContext('2d');
+        x.fillStyle = 'rgba(0,0,0,0)';
+        x.fillRect(0, 0, 2, 4);
+        x.fillStyle = 'rgba(0,0,0,0.06)';
+        x.fillRect(0, 3, 2, 1);
+        this.scanlinePattern = c;
+    },
+
+    // Small noise tile we can animate for filmic grain.
+    _buildGrain() {
+        const size = 128;
+        const c = document.createElement('canvas');
+        c.width = size; c.height = size;
+        const x = c.getContext('2d');
+        const img = x.createImageData(size, size);
+        for (let i = 0; i < img.data.length; i += 4) {
+            const v = 128 + (Math.random() - 0.5) * 40;
+            img.data[i] = v;
+            img.data[i + 1] = v;
+            img.data[i + 2] = v;
+            img.data[i + 3] = 255;
+        }
+        x.putImageData(img, 0, 0);
+        this.grainBuffer = c;
+    },
+
+    // Start of frame: clear the offscreen target and return its ctx
+    // so callers can draw the scene into it.
+    beginFrame() {
+        const c = this.fboCtx;
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.clearRect(0, 0, CFG.WIDTH, CFG.HEIGHT);
+        return c;
+    },
+
+    // End of frame: composite fbo -> mainCtx with all effects applied.
+    endFrame(mainCtx) {
+        if (!this.enabled) {
+            mainCtx.drawImage(this.fbo, 0, 0);
+            return;
+        }
+
+        // Base image
+        mainCtx.drawImage(this.fbo, 0, 0);
+
+        // BLOOM: downsample brights, blur, add back
+        if (this.bloomEnabled) {
+            const W = CFG.WIDTH, H = CFG.HEIGHT;
+
+            // Bright pass at half-res: crush midtones so only highlights bloom
+            this.bloomACtx.setTransform(1, 0, 0, 1, 0, 0);
+            this.bloomACtx.clearRect(0, 0, W / 2, H / 2);
+            this.bloomACtx.filter = 'brightness(0.75) contrast(2.2)';
+            this.bloomACtx.drawImage(this.fbo, 0, 0, W / 2, H / 2);
+            this.bloomACtx.filter = 'none';
+
+            // First blur pass at quarter-res
+            this.bloomBCtx.setTransform(1, 0, 0, 1, 0, 0);
+            this.bloomBCtx.clearRect(0, 0, W / 4, H / 4);
+            this.bloomBCtx.filter = 'blur(3px)';
+            this.bloomBCtx.drawImage(this.bloomA, 0, 0, W / 4, H / 4);
+            this.bloomBCtx.filter = 'none';
+
+            // Second blur pass for wider halo, back into bloomA
+            this.bloomACtx.filter = 'blur(6px)';
+            this.bloomACtx.clearRect(0, 0, W / 2, H / 2);
+            this.bloomACtx.drawImage(this.bloomB, 0, 0, W / 2, H / 2);
+            this.bloomACtx.filter = 'none';
+
+            // Composite additively at full res (subtle halo, not a wash)
+            mainCtx.globalCompositeOperation = 'lighter';
+            mainCtx.globalAlpha = 0.22;
+            mainCtx.drawImage(this.bloomA, 0, 0, W, H);
+            mainCtx.globalAlpha = 1;
+            mainCtx.globalCompositeOperation = 'source-over';
+        }
+
+        // FLASH overlay (fullscreen colored flash that decays)
+        if (this.flashAlpha > 0 && this.flashColor) {
+            mainCtx.globalCompositeOperation = 'lighter';
+            mainCtx.fillStyle = this.flashColor;
+            mainCtx.globalAlpha = this.flashAlpha;
+            mainCtx.fillRect(0, 0, CFG.WIDTH, CFG.HEIGHT);
+            mainCtx.globalAlpha = 1;
+            mainCtx.globalCompositeOperation = 'source-over';
+            this.flashAlpha *= 0.85;
+            if (this.flashAlpha < 0.01) this.flashAlpha = 0;
+        }
+
+        // VIGNETTE (darken edges, slightly red if damaged)
+        if (this.vignetteEnabled) {
+            const cx = CFG.WIDTH / 2, cy = CFG.HEIGHT / 2;
+            const grad = mainCtx.createRadialGradient(cx, cy, CFG.WIDTH * 0.4, cx, cy, CFG.WIDTH * 0.75);
+            grad.addColorStop(0, 'rgba(0,0,0,0)');
+            grad.addColorStop(1, 'rgba(0,0,0,0.42)');
+            mainCtx.fillStyle = grad;
+            mainCtx.fillRect(0, 0, CFG.WIDTH, CFG.HEIGHT);
+
+            if (this.damageVignette > 0) {
+                const dg = mainCtx.createRadialGradient(cx, cy, CFG.WIDTH * 0.2, cx, cy, CFG.WIDTH * 0.7);
+                dg.addColorStop(0, 'rgba(180,20,20,0)');
+                dg.addColorStop(1, `rgba(180,20,20,${0.5 * this.damageVignette})`);
+                mainCtx.fillStyle = dg;
+                mainCtx.fillRect(0, 0, CFG.WIDTH, CFG.HEIGHT);
+                this.damageVignette *= 0.94;
+                if (this.damageVignette < 0.01) this.damageVignette = 0;
+            }
+        }
+
+        // SCANLINES (very subtle, multiply)
+        if (this.scanlinesEnabled && this.scanlinePattern) {
+            const pat = mainCtx.createPattern(this.scanlinePattern, 'repeat');
+            if (pat) {
+                mainCtx.globalCompositeOperation = 'multiply';
+                mainCtx.fillStyle = pat;
+                mainCtx.fillRect(0, 0, CFG.WIDTH, CFG.HEIGHT);
+                mainCtx.globalCompositeOperation = 'source-over';
+            }
+        }
+
+        // GRAIN (animated film-grain, very subtle)
+        if (this.grainEnabled && this.grainBuffer) {
+            this.grainFrame = (this.grainFrame + 1) & 0xFF;
+            const ox = (this.grainFrame * 37) % 128;
+            const oy = (this.grainFrame * 91) % 128;
+            mainCtx.globalCompositeOperation = 'overlay';
+            mainCtx.globalAlpha = 0.07;
+            // Tile the grain across the screen (offset per frame for movement)
+            for (let y = -oy; y < CFG.HEIGHT; y += 128) {
+                for (let x = -ox; x < CFG.WIDTH; x += 128) {
+                    mainCtx.drawImage(this.grainBuffer, x, y);
+                }
+            }
+            mainCtx.globalAlpha = 1;
+            mainCtx.globalCompositeOperation = 'source-over';
+        }
+    },
+
+    // ------- Effect triggers (called from gameplay) -------
+    flash(color, alpha) {
+        this.flashColor = color;
+        this.flashAlpha = Math.max(this.flashAlpha, alpha);
+    },
+
+    triggerDamageVignette(intensity) {
+        this.damageVignette = Math.max(this.damageVignette, intensity);
     }
 };
