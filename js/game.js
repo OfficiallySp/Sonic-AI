@@ -190,9 +190,7 @@ const Game = {
     updatePaused() {
         if (Input.pressed('Escape') || Input.pressed('KeyP') || Input.enter) {
             this.state = 'playing';
-            // Restart music
-            const music = World.level.bgMusic;
-            Sound.startMusic(music.tempo, music.melody, music.bass);
+            Sound.startMusic(World.level.bgMusic);
         }
     },
 
@@ -292,8 +290,7 @@ const Game = {
         Player.init(lvl.playerStart.x, lvl.playerStart.y);
         Camera.follow(Player, true);
 
-        // Start music
-        Sound.startMusic(lvl.bgMusic.tempo, lvl.bgMusic.melody, lvl.bgMusic.bass);
+        Sound.startMusic(lvl.bgMusic);
     },
 
     nextLevel() {
@@ -359,8 +356,7 @@ const Game = {
                 Player.rings = 0;
                 this.state = 'playing';
                 Camera.follow(Player, true);
-                const music = World.level.bgMusic;
-                Sound.startMusic(music.tempo, music.melody, music.bass);
+                Sound.startMusic(World.level.bgMusic);
                 this.startTransition('fadeIn', 0.04);
             });
         }

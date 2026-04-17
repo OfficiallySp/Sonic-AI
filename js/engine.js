@@ -507,71 +507,219 @@ const Sound = {
         osc.start(t); osc.stop(t + 0.12);
     },
 
-    // Procedural background music: detuned-pair melody + filtered bass +
-    // drum kit (kick on beats 1,3 and hats on eighths, snare on 2,4).
-    startMusic(tempo, notePattern, bassPattern) {
+    // Procedural open hi-hat (longer decay, a splashier tail)
+    _openHat(t, dest) {
+        const src = this._noiseSource();
+        const filt = this.ctx.createBiquadFilter();
+        filt.type = 'highpass';
+        filt.frequency.value = 6500;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.09, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+        src.connect(filt); filt.connect(g); g.connect(dest);
+        src.start(t); src.stop(t + 0.24);
+    },
+
+    // Procedural ghost snare (quieter, rounder - adds groove texture between backbeats)
+    _ghostSnare(t, dest) {
+        const src = this._noiseSource();
+        const filt = this.ctx.createBiquadFilter();
+        filt.type = 'bandpass';
+        filt.frequency.value = 1400;
+        filt.Q.value = 0.9;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.07, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+        src.connect(filt); filt.connect(g); g.connect(dest);
+        src.start(t); src.stop(t + 0.08);
+    },
+
+    // Procedural tom (pitched sine with quick pitch envelope for fills)
+    _tom(t, freq, dest) {
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, t);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.55, t + 0.14);
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.24, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+        osc.connect(g); g.connect(dest);
+        osc.start(t); osc.stop(t + 0.2);
+    },
+
+    // Procedural background music: 4-layer arrangement.
+    //   * Lead   — detuned square+triangle pair with vibrato, panned left,
+    //              with a dotted-echo delay send for width/sparkle.
+    //   * Arp    — triangle + sine doubled at octave, panned right, fills
+    //              harmonic space between lead and bass.
+    //   * Bass   — filtered sawtooth, center, no swing.
+    //   * Drums  — kick/snare/hats + ghost snares and open hats, plus a
+    //              tom-roll fill on the last beat of every 4-bar phrase.
+    // Patterns are 16th-note arrays (16 steps per bar). Pass a track object:
+    //   { tempo, lead, arp, bass, swing }. Any array can be omitted.
+    startMusic(track) {
         if (!this.ctx) return;
         this.stopMusic();
         this.musicPlaying = true;
         this.musicGeneration++;
         const gen = this.musicGeneration;
 
-        const beatLen = 60 / tempo;
-        const totalBeats = notePattern.length;
-        const loopDur = totalBeats * beatLen;
+        const { tempo = 140, lead, arp, bass, swing = 0.15 } = track || {};
+        const stepLen = 60 / tempo / 4; // 16th note
+        const steps = Math.max(
+            lead ? lead.length : 0,
+            arp ? arp.length : 0,
+            bass ? bass.length : 0,
+            32
+        );
+        const loopDur = steps * stepLen;
 
-        // Filter for the bass (keeps it warm and tight)
+        // --- Bass bus: lowpass for warmth ---
         const bassFilt = this.ctx.createBiquadFilter();
         bassFilt.type = 'lowpass';
-        bassFilt.frequency.value = 800;
-        bassFilt.Q.value = 1.2;
+        bassFilt.frequency.value = 900;
+        bassFilt.Q.value = 1.1;
         bassFilt.connect(this.musicGain);
+
+        // --- Lead bus: lowpass + stereo pan + dotted-echo delay ---
+        const leadFilt = this.ctx.createBiquadFilter();
+        leadFilt.type = 'lowpass';
+        leadFilt.frequency.value = 3800;
+        leadFilt.Q.value = 0.6;
+        const leadPan = this.ctx.createStereoPanner();
+        leadPan.pan.value = -0.22;
+        leadFilt.connect(leadPan);
+        leadPan.connect(this.musicGain);
+
+        const delay = this.ctx.createDelay(1.0);
+        delay.delayTime.value = stepLen * 3;
+        const delayFb = this.ctx.createGain();
+        delayFb.gain.value = 0.28;
+        const delayWet = this.ctx.createGain();
+        delayWet.gain.value = 0.2;
+        const delayPan = this.ctx.createStereoPanner();
+        delayPan.pan.value = 0.4; // echoes bounce to the other side
+        leadPan.connect(delay);
+        delay.connect(delayFb);
+        delayFb.connect(delay);
+        delay.connect(delayPan);
+        delayPan.connect(delayWet);
+        delayWet.connect(this.musicGain);
+
+        // --- Arp bus: panned right, no filter (triangle is already soft) ---
+        const arpPan = this.ctx.createStereoPanner();
+        arpPan.pan.value = 0.28;
+        arpPan.connect(this.musicGain);
+
+        // Swing offset: odd 16ths (2nd of each 8th-note pair) pushed late.
+        const swingFor = (i) => (i % 2 === 1) ? swing * stepLen : 0;
+
+        // Look ahead to find how long a note in `pattern` should play
+        // (ie. until the next non-rest entry, or end of pattern).
+        const noteDur = (pattern, i) => {
+            for (let j = i + 1; j < pattern.length; j++) {
+                if (pattern[j] > 0) return (j - i) * stepLen;
+            }
+            return (pattern.length - i) * stepLen;
+        };
 
         const scheduleLoop = (startTime) => {
             if (!this.musicPlaying || gen !== this.musicGeneration) return;
 
-            const addNode = (osc) => {
-                osc.onended = () => {
-                    const idx = this.musicNodes.indexOf(osc);
+            const addNode = (node) => {
+                node.onended = () => {
+                    const idx = this.musicNodes.indexOf(node);
                     if (idx !== -1) this.musicNodes.splice(idx, 1);
                 };
-                this.musicNodes.push(osc);
+                this.musicNodes.push(node);
             };
 
-            // Melody (two detuned voices -> width)
-            notePattern.forEach((note, i) => {
-                if (note <= 0) return;
-                const t = startTime + i * beatLen;
-                const dur = beatLen * 0.85;
-                [{ type: 'square', gain: 0.09, detune: -7 },
-                 { type: 'triangle', gain: 0.08, detune: 7 }].forEach(v => {
+            // ---- Lead ----
+            if (lead) {
+                lead.forEach((note, i) => {
+                    if (note <= 0) return;
+                    const t = startTime + i * stepLen + swingFor(i);
+                    const dur = Math.min(noteDur(lead, i) * 0.92, stepLen * 8);
+                    const onBeat = (i % 4 === 0);
+                    const baseGain = onBeat ? 0.1 : 0.075;
+
+                    [{ type: 'square', gain: baseGain, detune: -8 },
+                     { type: 'triangle', gain: baseGain * 0.85, detune: 8 }].forEach(v => {
+                        const osc = this.ctx.createOscillator();
+                        osc.type = v.type;
+                        osc.frequency.value = note;
+                        osc.detune.value = v.detune;
+
+                        // Vibrato LFO fades in after the attack so the
+                        // initial transient stays clean.
+                        const lfo = this.ctx.createOscillator();
+                        lfo.type = 'sine';
+                        lfo.frequency.value = 6;
+                        const lfoGain = this.ctx.createGain();
+                        lfoGain.gain.setValueAtTime(0, t);
+                        lfoGain.gain.linearRampToValueAtTime(8, t + Math.min(0.12, dur * 0.35));
+                        lfo.connect(lfoGain);
+                        lfoGain.connect(osc.detune);
+                        lfo.start(t);
+                        lfo.stop(t + dur + 0.02);
+                        addNode(lfo);
+
+                        const g = this.ctx.createGain();
+                        g.gain.setValueAtTime(0, t);
+                        g.gain.linearRampToValueAtTime(v.gain, t + 0.012);
+                        g.gain.linearRampToValueAtTime(v.gain * 0.6, t + dur * 0.4);
+                        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+                        osc.connect(g); g.connect(leadFilt);
+                        osc.start(t); osc.stop(t + dur + 0.02);
+                        addNode(osc);
+                    });
+                });
+            }
+
+            // ---- Arp (triangle + sine sparkle at octave) ----
+            if (arp) {
+                arp.forEach((note, i) => {
+                    if (note <= 0) return;
+                    const t = startTime + i * stepLen + swingFor(i);
+                    const dur = stepLen * 1.8;
+
                     const osc = this.ctx.createOscillator();
-                    osc.type = v.type;
+                    osc.type = 'triangle';
                     osc.frequency.value = note;
-                    osc.detune.value = v.detune;
                     const g = this.ctx.createGain();
                     g.gain.setValueAtTime(0, t);
-                    g.gain.linearRampToValueAtTime(v.gain, t + 0.01);
-                    g.gain.linearRampToValueAtTime(v.gain * 0.6, t + dur * 0.5);
+                    g.gain.linearRampToValueAtTime(0.055, t + 0.004);
                     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-                    osc.connect(g); g.connect(this.musicGain);
+                    osc.connect(g); g.connect(arpPan);
                     osc.start(t); osc.stop(t + dur + 0.02);
                     addNode(osc);
-                });
-            });
 
-            // Bass (through LP filter)
-            if (bassPattern) {
-                bassPattern.forEach((note, i) => {
+                    const sp = this.ctx.createOscillator();
+                    sp.type = 'sine';
+                    sp.frequency.value = note * 2;
+                    const sg = this.ctx.createGain();
+                    sg.gain.setValueAtTime(0, t);
+                    sg.gain.linearRampToValueAtTime(0.018, t + 0.004);
+                    sg.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.6);
+                    sp.connect(sg); sg.connect(arpPan);
+                    sp.start(t); sp.stop(t + dur * 0.6 + 0.02);
+                    addNode(sp);
+                });
+            }
+
+            // ---- Bass (no swing - keeps the pocket steady) ----
+            if (bass) {
+                bass.forEach((note, i) => {
                     if (note <= 0) return;
-                    const t = startTime + i * beatLen;
-                    const dur = beatLen * 0.8;
+                    const t = startTime + i * stepLen;
+                    const dur = Math.min(noteDur(bass, i) * 0.94, stepLen * 4);
                     const osc = this.ctx.createOscillator();
                     osc.type = 'sawtooth';
                     osc.frequency.value = note;
                     const g = this.ctx.createGain();
                     g.gain.setValueAtTime(0, t);
-                    g.gain.linearRampToValueAtTime(0.14, t + 0.015);
+                    g.gain.linearRampToValueAtTime(0.13, t + 0.01);
+                    g.gain.linearRampToValueAtTime(0.09, t + dur * 0.3);
                     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
                     osc.connect(g); g.connect(bassFilt);
                     osc.start(t); osc.stop(t + dur + 0.02);
@@ -579,21 +727,42 @@ const Sound = {
                 });
             }
 
-            // Drum kit: four beats on every 2 pattern steps (assumes 8th notes)
-            const stepsPerBeat = 2; // pattern is in 8th notes
-            const beats = totalBeats / stepsPerBeat;
-            for (let b = 0; b < beats; b++) {
-                const t = startTime + b * beatLen * stepsPerBeat;
-                // Kick on beats 1 and 3 (and syncopated 1-and occasionally)
-                if (b % 4 === 0 || b % 4 === 2) this._kick(t, this.musicGain);
-                // Snare on beats 2 and 4
-                if (b % 4 === 1 || b % 4 === 3) this._snare(t, this.musicGain);
-                // Hats on every eighth
-                this._hat(t, this.musicGain);
-                this._hat(t + beatLen, this.musicGain);
+            // ---- Drums: kit + end-of-phrase fill ----
+            const barSteps = 16;
+            const totalBars = Math.max(1, Math.floor(steps / barSteps));
+            for (let s = 0; s < steps; s++) {
+                const t = startTime + s * stepLen;
+                const inBar = s % barSteps;
+                const bar = Math.floor(s / barSteps);
+                const isLastBar = bar === totalBars - 1;
+                const isFill = isLastBar && inBar >= 12;
+
+                if (isFill) {
+                    // Tom-roll into a final snare punch
+                    if (inBar === 12) this._tom(t, 110, this.musicGain);
+                    else if (inBar === 13) this._tom(t, 150, this.musicGain);
+                    else if (inBar === 14) this._tom(t, 200, this.musicGain);
+                    else if (inBar === 15) this._snare(t, this.musicGain);
+                    if (s % 2 === 0) this._hat(t, this.musicGain);
+                    continue;
+                }
+
+                // Kick on 1 and 3
+                if (inBar === 0 || inBar === 8) this._kick(t, this.musicGain);
+                // Syncopated "and of 4" kick on odd bars for forward motion
+                if (bar % 2 === 1 && inBar === 14) this._kick(t, this.musicGain);
+                // Snare on 2 and 4
+                if (inBar === 4 || inBar === 12) this._snare(t, this.musicGain);
+                // Ghost snare between 1 and 2 of bar 1 (counting from 0)
+                if (bar === 1 && inBar === 2) this._ghostSnare(t, this.musicGain);
+                // Hats on every 8th; open hat on "and of 2" / "and of 4"
+                if (s % 2 === 0) {
+                    if (inBar === 6 || inBar === 14) this._openHat(t, this.musicGain);
+                    else this._hat(t, this.musicGain);
+                }
             }
 
-            setTimeout(() => scheduleLoop(startTime + loopDur), (loopDur - 0.5) * 1000);
+            setTimeout(() => scheduleLoop(startTime + loopDur), (loopDur - 0.35) * 1000);
         };
 
         scheduleLoop(this.ctx.currentTime + 0.1);
