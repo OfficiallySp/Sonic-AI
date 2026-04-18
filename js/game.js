@@ -7,7 +7,16 @@ const Game = {
     ctx: null,
     state: 'loading',  // loading, title, playing, paused, levelComplete, gameOver, victory
     currentLevel: 0,
-    totalLevels: 3,
+    // Six levels: three zones × two acts. Even indices are platforming acts,
+    // odd indices are boss acts (see World.buildLevel).
+    totalLevels: 6,
+    zoneNames: ['EMERALD VALLEY', 'NEON FACTORY', 'SKY SANCTUARY'],
+    zoneOf(level) { return Math.floor(level / 2); },
+    actOf(level) { return (level % 2) + 1; },
+    isBossAct(level) { return (level % 2) === 1; },
+    levelLabel(level) {
+        return `${this.zoneNames[this.zoneOf(level)]} - ACT ${this.actOf(level)}`;
+    },
     frameCount: 0,
     lastTime: 0,
     accumulator: 0,
@@ -269,8 +278,9 @@ const Game = {
     // ---- GAME FLOW ----
 
     startGame() {
-        // Optional dev shortcut: "#2" in the URL jumps straight to level 3.
-        // Useful for testing specific zones without replaying earlier acts.
+        // Optional dev shortcut: "#3" in the URL jumps straight to level 4.
+        // Useful for testing specific zones/boss fights without replaying
+        // earlier acts. Valid values 0..5 (all six acts).
         const hashLevel = parseInt(window.location.hash.replace('#', ''), 10);
         const startAt = (Number.isFinite(hashLevel) && hashLevel >= 0 && hashLevel < this.totalLevels)
             ? hashLevel : 0;
@@ -352,11 +362,24 @@ const Game = {
             Sound.gameOver();
         } else {
             this.startTransition('fadeOut', 0.03, () => {
-                Player.respawn();
-                Player.rings = 0;
+                if (World.level && World.level.isBossAct) {
+                    // Boss arenas are stateful (sealed walls, locked camera,
+                    // boss HP, minions, boss music). A plain respawn would
+                    // drop Sonic outside the still-locked arena and leave the
+                    // fight half-started, so fully reload the level instead.
+                    const savedScore = Player.score;
+                    const savedLives = Player.lives;
+                    this.loadLevel(this.currentLevel);
+                    Player.score = savedScore;
+                    Player.lives = savedLives;
+                    Player.rings = 0;
+                } else {
+                    Player.respawn();
+                    Player.rings = 0;
+                    Camera.follow(Player, true);
+                    Sound.startMusic(World.level.bgMusic);
+                }
                 this.state = 'playing';
-                Camera.follow(Player, true);
-                Sound.startMusic(World.level.bgMusic);
                 this.startTransition('fadeIn', 0.04);
             });
         }
@@ -607,11 +630,59 @@ const Game = {
         // Level name
         ctx.textAlign = 'right';
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
-        ctx.fillRect(CFG.WIDTH - 180, CFG.HEIGHT - 32, 180, 32);
+        ctx.fillRect(CFG.WIDTH - 200, CFG.HEIGHT - 32, 200, 32);
         ctx.font = '14px sans-serif';
         ctx.fillStyle = '#FFD700';
-        const levelNames = ['EMERALD VALLEY', 'NEON FACTORY', 'SKY SANCTUARY'];
-        ctx.fillText(levelNames[this.currentLevel] + ' - ACT ' + (this.currentLevel + 1), CFG.WIDTH - pad, CFG.HEIGHT - 12);
+        ctx.fillText(this.levelLabel(this.currentLevel), CFG.WIDTH - pad, CFG.HEIGHT - 12);
+
+        // Boss HP bar (only when an active boss is on the field).
+        this.drawBossHpBar(ctx);
+    },
+
+    drawBossHpBar(ctx) {
+        const boss = World.entities && World.entities.find(
+            e => e instanceof Boss && (e.phase === 'active' || e.phase === 'dying')
+        );
+        if (!boss) return;
+
+        const barW = 260, barH = 10;
+        const barX = (CFG.WIDTH - barW) / 2;
+        const barY = 58;
+
+        // Panel
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(barX - 8, barY - 22, barW + 16, barH + 32);
+
+        // Name
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillStyle = '#FF9977';
+        ctx.fillText(boss.name, CFG.WIDTH / 2, barY - 7);
+
+        // Bar track
+        ctx.fillStyle = '#330000';
+        ctx.fillRect(barX, barY, barW, barH);
+        // Bar fill
+        const pct = Math.max(0, boss.hp / boss.maxHp);
+        const fillColor = boss.invulnTimer > 0 && (boss.invulnTimer % 6) < 3
+            ? '#FFCC66' : '#FF3333';
+        ctx.fillStyle = fillColor;
+        ctx.fillRect(barX, barY, barW * pct, barH);
+        // Bar outline
+        ctx.strokeStyle = '#FF7755';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(barX + 0.5, barY + 0.5, barW - 1, barH - 1);
+
+        // Segment ticks for HP pips
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < boss.maxHp; i++) {
+            const tx = barX + (barW / boss.maxHp) * i;
+            ctx.beginPath();
+            ctx.moveTo(tx, barY);
+            ctx.lineTo(tx, barY + barH);
+            ctx.stroke();
+        }
     },
 
     drawPauseOverlay(ctx) {
@@ -642,12 +713,14 @@ const Game = {
         ctx.textAlign = 'center';
         ctx.font = 'bold 40px sans-serif';
         ctx.fillStyle = '#FFD700';
-        const levelNames = ['EMERALD VALLEY', 'NEON FACTORY', 'SKY SANCTUARY'];
-        ctx.fillText(levelNames[this.currentLevel], cx, startY);
+        ctx.fillText(this.zoneNames[this.zoneOf(this.currentLevel)], cx, startY);
 
         ctx.font = 'bold 24px sans-serif';
         ctx.fillStyle = '#FFFFFF';
-        ctx.fillText('ACT ' + (this.currentLevel + 1) + ' COMPLETE!', cx, startY + 36);
+        const completionTitle = this.isBossAct(this.currentLevel)
+            ? `ACT ${this.actOf(this.currentLevel)} CLEARED!`
+            : `ACT ${this.actOf(this.currentLevel)} COMPLETE!`;
+        ctx.fillText(completionTitle, cx, startY + 36);
 
         // Tally
         if (t.timer > 60) {

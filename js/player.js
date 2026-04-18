@@ -669,6 +669,79 @@ const Player = {
                     // Take damage
                     this.takeDamage(ent);
                 }
+                return;
+            }
+
+            // Boss trigger: entering the arena activates the fight and
+            // slams the energy wall closed behind the player.
+            if (ent instanceof BossTrigger) {
+                ent.trigger(this);
+                return;
+            }
+
+            // Boss energy wall: blocks horizontal movement like a tile.
+            // Only active during the fight; auto-disables on boss defeat.
+            if (ent instanceof BossWall && ent.enabled) {
+                // Push the player back to whichever side they came from.
+                if (this.x < eb.x + eb.w / 2) {
+                    this.x = eb.x - this.w / 2;
+                    if (this.vx > 0) this.vx = 0;
+                } else {
+                    this.x = eb.x + eb.w + this.w / 2;
+                    if (this.vx < 0) this.vx = 0;
+                }
+                return;
+            }
+
+            // Boss projectiles: lasers/bombs/shockwaves all hurt on contact.
+            if (ent instanceof BossProjectile) {
+                if (!ent.hot) return;
+                if (this.invincible > 0 && this.state !== 'hurt') {
+                    // Deflect: cancel the projectile and spark
+                    if (ent.type !== 'laser') {
+                        ent.active = false;
+                        for (let i = 0; i < 6; i++) {
+                            World.addParticle(ent.x, ent.y,
+                                Utils.rand(-3, 3), Utils.rand(-3, 0),
+                                20, 'spark');
+                        }
+                    }
+                    return;
+                }
+                this.takeDamage(ent);
+                return;
+            }
+
+            // Boss body. Ball-form hits to the weak bounds damage the boss;
+            // any other contact damages the player.
+            if (ent instanceof Boss) {
+                if (ent.phase !== 'active') return;
+
+                const weak = ent.getWeakBounds ? ent.getWeakBounds() : eb;
+                const hitBody = Utils.overlap(pb, eb);
+                if (!hitBody) return;
+
+                const attackingFromAbove = this.vy > 0 && pb.y + pb.h < weak.y + weak.h * 0.7;
+                const canHitBoss = isBall || attackingFromAbove;
+
+                if (canHitBoss && Utils.overlap(pb, weak)) {
+                    if (ent.takeHit(this)) {
+                        this.vy = CFG.JUMP_FORCE * 0.7;
+                        this.grounded = false;
+                        if (this.state !== 'rolling') this.state = 'jumping';
+                        return;
+                    }
+                    // Boss was invulnerable: treat as a bump, don't damage either side.
+                    this.vy = CFG.JUMP_FORCE * 0.4;
+                    this.grounded = false;
+                    if (this.state !== 'rolling') this.state = 'jumping';
+                    return;
+                }
+
+                // Non-attacking contact with the body hurts.
+                if (this.invincible > 0 && this.state !== 'hurt') return;
+                this.takeDamage(ent);
+                return;
             }
         });
     },

@@ -467,6 +467,1277 @@ class GoalPost {
     }
 }
 
+// ---- BOSS SYSTEM ----
+
+// Boss theme: aggressive minor groove in D minor, up-tempo, tight swing.
+// Used for every Act 2 fight. Kept intentionally short/loopy so hits
+// punch through the mix instead of fighting for attention.
+const BOSS_MUSIC = {
+    tempo: 168,
+    swing: 0.05,
+    lead: [
+        // Dm:  D5   .   F5   .   A5   .   D6   .   C6   .   A5   .   F5   .   D5   .
+        587, 0, 698, 0, 880, 0, 1175, 0, 1047, 0, 880, 0, 698, 0, 587, 0,
+        // Gm:  G4   .   Bb4  .   D5   .   G5   .   F5   .   D5   .   Bb4  .   G4   .
+        392, 0, 466, 0, 587, 0, 784, 0, 698, 0, 587, 0, 466, 0, 392, 0,
+        // A:   A4   .   C#5  .   E5   .   A5   .   G5   .   E5   .   C#5  .   A4   .
+        440, 0, 554, 0, 659, 0, 880, 0, 784, 0, 659, 0, 554, 0, 440, 0,
+        // Dm:  D5   .   A5   .   D6   .   F6    .   A6    .   F6    .   D6   A5 F5 D5
+        587, 0, 880, 0, 1175, 0, 1397, 0, 1760, 0, 1397, 0, 1175, 880, 698, 587,
+    ],
+    arp: [
+        // Dm (D4, F4, A4, D5)
+        294, 0, 349, 0, 440, 0, 587, 0, 440, 0, 349, 0, 440, 0, 587, 0,
+        // Gm (G3, Bb3, D4, G4)
+        196, 0, 233, 0, 294, 0, 392, 0, 294, 0, 233, 0, 294, 0, 392, 0,
+        // A (A3, C#4, E4, A4)
+        220, 0, 277, 0, 330, 0, 440, 0, 330, 0, 277, 0, 330, 0, 440, 0,
+        // Dm (D4, F4, A4, D5)
+        294, 0, 349, 0, 440, 0, 587, 0, 440, 0, 349, 0, 440, 0, 587, 0,
+    ],
+    bass: [
+        // Dm: D1 D2 D1 D2 A1 A2 D2 C2
+        37, 0, 73, 0, 37, 0, 73, 0, 55, 0, 110, 0, 73, 0, 65, 0,
+        // Gm: G1 G2 G1 G2 D2 D3 G2 F2
+        49, 0, 98, 0, 49, 0, 98, 0, 73, 0, 147, 0, 98, 0, 87, 0,
+        // A: A1 A2 A1 A2 E2 E3 A2 G2
+        55, 0, 110, 0, 55, 0, 110, 0, 82, 0, 165, 0, 110, 0, 98, 0,
+        // Dm: D1 D2 D1 D2 A1 A2 D2 A1 (drives back to root)
+        37, 0, 73, 0, 37, 0, 73, 0, 55, 0, 110, 0, 73, 0, 55, 0,
+    ]
+};
+
+// Invisible barrier that seals the arena once the fight starts. Acts like
+// a tile wall for horizontal motion but only while enabled. Disabled on
+// boss defeat so the player can walk to the goal.
+class BossWall {
+    constructor(x, y, height) {
+        this.x = x;
+        this.y = y;
+        this.h = height || 16 * CFG.TILE;
+        this.w = 16;
+        this.active = true;
+        this.enabled = false;
+    }
+
+    enable() { this.enabled = true; }
+    disable() { this.enabled = false; }
+
+    update() {}
+
+    draw(ctx) {
+        if (!this.enabled) return;
+        // Shimmering energy wall so the player sees the arena boundary.
+        const sx = Camera.screenX(this.x);
+        const top = Camera.screenY(this.y);
+        const h = this.h;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const pulse = 0.3 + Math.sin(Date.now() * 0.006) * 0.15;
+        const grad = ctx.createLinearGradient(sx - 6, 0, sx + 10, 0);
+        grad.addColorStop(0, 'rgba(120,200,255,0)');
+        grad.addColorStop(0.5, `rgba(160,220,255,${pulse})`);
+        grad.addColorStop(1, 'rgba(120,200,255,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(sx - 6, top, 16, h);
+        // Vertical scanline streaks
+        ctx.strokeStyle = `rgba(200,240,255,${0.25 + pulse * 0.3})`;
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 6; i++) {
+            const y = top + ((Date.now() * 0.1 + i * 40) % h);
+            ctx.beginPath();
+            ctx.moveTo(sx - 4, y);
+            ctx.lineTo(sx + 6, y);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    getBounds() {
+        return { x: this.x - this.w / 2, y: this.y, w: this.w, h: this.h };
+    }
+}
+
+// Invisible line that activates the boss when the player crosses it. The
+// trigger lives just inside the arena entrance so running in commits to
+// the fight — matches the classic "walk in, door slams shut" setup.
+class BossTrigger {
+    constructor(x, y, boss, wall) {
+        this.x = x;
+        this.y = y;
+        this.boss = boss;
+        this.wall = wall;
+        this.active = true;
+        this.triggered = false;
+        this.w = 16;
+        this.h = 16 * CFG.TILE;
+    }
+
+    update() {
+        if (this.triggered) this.active = false;
+    }
+
+    draw(ctx) {}
+
+    getBounds() {
+        return { x: this.x - this.w / 2, y: this.y, w: this.w, h: this.h };
+    }
+
+    trigger(player) {
+        if (this.triggered) return;
+        this.triggered = true;
+        this.active = false;
+        // Enable all boss walls in the arena (entrance + exit) so the fight
+        // becomes a sealed room. They're dropped together on Boss.onDefeated.
+        World.entities.forEach(e => { if (e instanceof BossWall) e.enable(); });
+        if (this.boss) this.boss.activate();
+        // Lock the camera to the arena so the fight stays framed.
+        if (this.boss && this.boss.arena) {
+            Camera.bounds = {
+                minX: this.boss.arena.left,
+                minY: 0,
+                maxX: this.boss.arena.right,
+                maxY: World.level.height * CFG.TILE,
+            };
+        }
+        Sound.startMusic(BOSS_MUSIC);
+    }
+}
+
+// Projectile spawned by bosses: lasers, bombs, and ground shockwaves.
+// One class, profile-switched like particles, so bosses can fire whatever
+// they need without a subclass explosion.
+class BossProjectile {
+    constructor(x, y, vx, vy, life, type, opts) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx || 0;
+        this.vy = vy || 0;
+        this.life = life;
+        this.maxLife = life;
+        this.type = type;
+        this.active = true;
+        this.dead = false;
+        this.hot = true; // false while detonating so player collision stops early
+        const o = opts || {};
+        this.w = o.w || 16;
+        this.h = o.h || 16;
+        this.color = o.color || '#FF4444';
+        this.gravity = o.gravity != null ? o.gravity : (type === 'bomb' ? 0.28 : 0);
+        this.bounced = false;
+    }
+
+    update() {
+        this.life--;
+        if (this.life <= 0) { this.active = false; return; }
+
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += this.gravity;
+
+        if (this.type === 'bomb') {
+            const below = World.isSolid(this.x, this.y + this.h / 2 + 2);
+            if (below || this.life <= 1) this._detonate();
+        } else if (this.type === 'shockwave') {
+            // Hug the ground: keep snapping to the nearest tile top underneath.
+            const g = World.groundYBelow(this.x, this.y - 8);
+            if (g != null) this.y = g - this.h / 2;
+            // Expire on wall impact
+            if (World.isSolid(this.x + Math.sign(this.vx) * (this.w / 2 + 1), this.y)) {
+                this.active = false;
+            }
+        }
+    }
+
+    _detonate() {
+        this.active = false;
+        this.hot = false;
+        Sound.enemyPop();
+        Camera.shake(3, 10);
+        for (let i = 0; i < 14; i++) {
+            const a = Utils.rand(-Math.PI, 0);
+            World.addParticle(this.x, this.y,
+                Math.cos(a) * Utils.rand(2, 5),
+                Math.sin(a) * Utils.rand(1, 4),
+                35, 'spark');
+        }
+        // Ground shockwaves that sweep left and right from the impact point.
+        World.entities.push(new BossProjectile(this.x - 12, this.y, -4, 0, 50, 'shockwave',
+            { w: 24, h: 14, color: '#88CCFF' }));
+        World.entities.push(new BossProjectile(this.x + 12, this.y, 4, 0, 50, 'shockwave',
+            { w: 24, h: 14, color: '#88CCFF' }));
+    }
+
+    draw(ctx) {
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y);
+
+        if (this.type === 'laser') {
+            // Blistering red beam with flicker and additive glow bloom.
+            const jitter = (Math.random() - 0.5) * 1.5;
+            GFX.drawGlow(ctx, sx, sy, 18, 'rgba(255,80,80,0.85)', 1);
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = 'rgba(255,100,100,0.9)';
+            ctx.fillRect(sx - this.w / 2, sy - this.h / 2 + jitter, this.w, this.h);
+            ctx.fillStyle = 'rgba(255,240,240,1)';
+            ctx.fillRect(sx - this.w / 2, sy - this.h / 2 + 1 + jitter, this.w, Math.max(1, this.h - 2));
+            ctx.restore();
+        } else if (this.type === 'bomb') {
+            GFX.drawGlow(ctx, sx, sy, 14, 'rgba(255,140,40,0.7)', 1);
+            ctx.fillStyle = '#222';
+            ctx.beginPath();
+            ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            // Fuse sparks
+            if ((Math.floor(Date.now() / 60) & 1) === 0) {
+                ctx.fillStyle = '#FFCC33';
+                ctx.beginPath();
+                ctx.arc(sx + 3, sy - 7, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        } else if (this.type === 'shockwave') {
+            const t = 1 - (this.life / this.maxLife);
+            GFX.drawGlow(ctx, sx, sy, 18 + t * 6, 'rgba(120,200,255,0.85)', 1 - t);
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = `rgba(180,230,255,${0.9 - t * 0.7})`;
+            ctx.fillRect(sx - this.w / 2, sy - this.h / 2, this.w, this.h);
+            ctx.restore();
+        }
+    }
+
+    getBounds() {
+        return { x: this.x - this.w / 2, y: this.y - this.h / 2, w: this.w, h: this.h };
+    }
+}
+
+// Base class for bosses. Handles shared concerns: activation from a
+// BossTrigger, invulnerability frames after being hit, death sequence,
+// and the standard "hit by ball form" damage response. Subclasses only
+// implement AI patterns (updateAI), their own draw, and optionally a
+// separate weak-bounds rect if the whole body isn't a valid hit target.
+class Boss {
+    constructor(x, y, arena) {
+        this.x = x;
+        this.y = y;
+        this.homeX = x;
+        this.homeY = y;
+        this.arena = arena; // { left, right, top, bottom, centerX, floorY }
+        this.active = true;
+        this.dead = false;
+        this.phase = 'waiting'; // waiting, active, dying, dead
+        this.hp = 1;
+        this.maxHp = 1;
+        this.invulnTimer = 0;
+        this.deathTimer = 0;
+        this.time = 0;
+        this.facing = -1;
+        this.name = 'BOSS';
+        this.w = 40;
+        this.h = 40;
+    }
+
+    activate() {
+        if (this.phase === 'waiting') {
+            this.phase = 'active';
+            this.onActivate();
+        }
+    }
+
+    onActivate() {}
+
+    update() {
+        this.time++;
+        if (this.invulnTimer > 0) this.invulnTimer--;
+
+        switch (this.phase) {
+            case 'waiting':
+                this.updateWaiting();
+                break;
+            case 'active':
+                this.updateAI(Player);
+                break;
+            case 'dying':
+                this.updateDying();
+                break;
+            case 'dead':
+                break;
+        }
+    }
+
+    updateWaiting() {
+        // Slight idle bob so the boss looks menacing, not frozen.
+        this.y = this.homeY + Math.sin(this.time * 0.04) * 4;
+    }
+
+    updateAI(player) {}
+
+    updateDying() {
+        this.deathTimer++;
+        // Slowly sink while billowing smoke + sparks.
+        this.y += 0.6;
+        if ((this.deathTimer & 3) === 0) {
+            Camera.shake(4, 6);
+        }
+        if ((this.deathTimer & 1) === 0) {
+            for (let i = 0; i < 3; i++) {
+                const a = Utils.rand(0, Math.PI * 2);
+                World.addParticle(
+                    this.x + Utils.rand(-this.w / 2, this.w / 2),
+                    this.y + Utils.rand(-this.h / 2, this.h / 2),
+                    Math.cos(a) * Utils.rand(1, 3),
+                    Math.sin(a) * Utils.rand(1, 3) - 1,
+                    40, 'spark');
+            }
+            World.addParticle(
+                this.x + Utils.rand(-20, 20),
+                this.y + Utils.rand(-10, 10),
+                Utils.rand(-1, 1), Utils.rand(-2, -0.5),
+                50, 'ember');
+        }
+        if (this.deathTimer > 140) {
+            this.phase = 'dead';
+            this.dead = true;
+            this.onDefeated();
+            // Let the big boom linger one frame, then despawn on the next
+            // cleanup pass so the player sees the wall drop visibly.
+            this.active = false;
+        }
+    }
+
+    // Called when the player hits the boss with ball form. Returns true if
+    // the hit landed (caller bounces off), false if the boss was invulnerable.
+    takeHit(player) {
+        if (this.phase !== 'active' || this.invulnTimer > 0) return false;
+        this.hp--;
+        this.invulnTimer = 90; // ~1.5s between hits
+        Sound.enemyPop();
+        Camera.shake(6, 14);
+        PostFX.flash('rgba(255,220,120,0.32)', 0.5);
+        if (typeof Game !== 'undefined') Game.triggerHitPause(6);
+        Player.score += 200;
+        World.addPopup(this.x, this.y - 20, '+200', '#FFCC44');
+
+        for (let i = 0; i < 14; i++) {
+            const a = Utils.rand(0, Math.PI * 2);
+            World.addParticle(this.x, this.y,
+                Math.cos(a) * Utils.rand(2, 5),
+                Math.sin(a) * Utils.rand(2, 5),
+                30, 'spark');
+        }
+
+        if (this.hp <= 0) {
+            this.phase = 'dying';
+            this.deathTimer = 0;
+            Camera.shake(10, 40);
+            Sound.stopMusic();
+            this.onDefeatStart();
+        }
+        return true;
+    }
+
+    onDefeatStart() {}
+
+    onDefeated() {
+        // Drop the energy wall and reward the kill.
+        Player.score += 2000;
+        World.addPopup(this.x, this.y - 40, '+2000', '#FFD700');
+        World.entities.forEach(e => {
+            if (e instanceof BossWall) e.disable();
+        });
+        // Big final boom for the death sequence end.
+        Camera.shake(12, 20);
+        PostFX.flash('rgba(255,240,200,0.6)', 0.9);
+        for (let i = 0; i < 40; i++) {
+            const a = Utils.rand(0, Math.PI * 2);
+            const sp = Utils.rand(3, 8);
+            World.addParticle(this.x, this.y,
+                Math.cos(a) * sp, Math.sin(a) * sp - 1,
+                60, 'ember');
+        }
+    }
+
+    // The body rect (used for player collision). Subclasses override when
+    // their drawn silhouette doesn't match a simple centered box.
+    getBounds() {
+        return { x: this.x - this.w / 2, y: this.y - this.h / 2, w: this.w, h: this.h };
+    }
+
+    // The hittable rect (where a ball-form Sonic can damage the boss).
+    // Defaults to the body bounds; bosses with separate "weak point" visuals
+    // can override this to only be vulnerable on e.g. the head / pod.
+    getWeakBounds() {
+        return this.getBounds();
+    }
+
+    // Helper: solid wall-like rects that push the player instead of
+    // damaging them (wrecking-ball chain links, tank treads, etc.). Default
+    // is none; subclasses can override.
+    getHardBounds() { return null; }
+
+    flashing() {
+        return this.invulnTimer > 0 && (this.invulnTimer % 6) < 3;
+    }
+
+    draw(ctx) {}
+}
+
+// ---- ZONE 1 BOSS: WRECKER ----
+// Classic Sonic 1 style "swinging wrecking ball" boss. A hover-pod holds
+// a chain with a heavy steel ball that pendulums across the arena. Pod is
+// the weak point; ball is damage. Hits knock the pod back and up, and
+// escalate the swing speed in phase 2.
+class ValleyBoss extends Boss {
+    constructor(x, y, arena) {
+        super(x, y, arena);
+        this.name = 'WRECKER';
+        this.maxHp = 5;
+        this.hp = 5;
+        this.w = 64;
+        this.h = 44;
+        this.chainLength = 110;
+        this.ballRadius = 20;
+        this.swingPhase = 0;
+        this.swingSpeed = 0.042;
+        this.swingAmp = 1.15; // radians
+        this.rotorPhase = 0;
+        this.knockback = { x: 0, y: 0 };
+        this.driftPhase = Math.random() * Math.PI * 2;
+    }
+
+    onActivate() {
+        // Position the pod so the ball swings at floor level (threatens a
+        // grounded player) AND the pod is reachable by a jump from the floor.
+        // Geometry:
+        //   pivotY = homeY + h*0.4, ball at bottom = pivotY + chainLength.
+        //   We want ball bottom ~= floorY, pod bounds top ~= Sonic peak-jump.
+        this.homeX = this.arena.centerX;
+        this.homeY = this.arena.floorY - (this.chainLength + this.h * 0.4 + 12);
+        this.x = this.homeX;
+        this.y = this.arena.top - 60; // drop in from above the screen
+    }
+
+    updateAI(player) {
+        this.rotorPhase += 0.5;
+        this.swingPhase += this.swingSpeed;
+        this.driftPhase += 0.015;
+
+        // Target position: home + gentle horizontal drift, plus any knockback.
+        const driftX = Math.sin(this.driftPhase) * 70;
+        const bob = Math.sin(this.time * 0.05) * 5;
+        const tx = this.homeX + driftX + this.knockback.x;
+        const ty = this.homeY + bob + this.knockback.y;
+        this.x += (tx - this.x) * 0.06;
+        this.y += (ty - this.y) * 0.06;
+
+        // Recover knockback over time.
+        this.knockback.x *= 0.94;
+        this.knockback.y *= 0.94;
+
+        // Phase 2: swing faster once half-dead.
+        if (this.hp <= 2 && this.swingSpeed < 0.065) {
+            this.swingSpeed += 0.0002;
+        }
+
+        this._damagePlayerFromBall(player);
+    }
+
+    _damagePlayerFromBall(player) {
+        if (player.invincible > 0 || player.state === 'hurt' || player.state === 'dead') return;
+        const b = this.getBallPos();
+        const pb = player.getBounds();
+        const bx = b.x - this.ballRadius, by = b.y - this.ballRadius;
+        if (Utils.overlap(pb, { x: bx, y: by, w: this.ballRadius * 2, h: this.ballRadius * 2 })) {
+            player.takeDamage({ x: b.x, y: b.y });
+        }
+    }
+
+    getBallPos() {
+        const angle = Math.sin(this.swingPhase) * this.swingAmp;
+        const pivotX = this.x;
+        const pivotY = this.y + this.h * 0.4;
+        return {
+            x: pivotX + Math.sin(angle) * this.chainLength,
+            y: pivotY + Math.cos(angle) * this.chainLength,
+            angle,
+        };
+    }
+
+    takeHit(player) {
+        const hit = super.takeHit(player);
+        if (hit) {
+            // Kick the pod up and away from the player.
+            const dir = player.x < this.x ? 1 : -1;
+            this.knockback.x = dir * 90;
+            this.knockback.y = -40;
+        }
+        return hit;
+    }
+
+    draw(ctx) {
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y);
+
+        // Chain + ball always draws, even while dying (dramatic flop).
+        const b = this.getBallPos();
+        const bsx = Camera.screenX(b.x);
+        const bsy = Camera.screenY(b.y);
+
+        // Chain links
+        const segments = 8;
+        const pivotSX = sx;
+        const pivotSY = Camera.screenY(this.y + this.h * 0.4);
+        ctx.save();
+        for (let i = 1; i <= segments; i++) {
+            const t = i / segments;
+            const lx = pivotSX + (bsx - pivotSX) * t;
+            const ly = pivotSY + (bsy - pivotSY) * t;
+            ctx.fillStyle = i % 2 === 0 ? '#777' : '#999';
+            ctx.beginPath();
+            ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // Wrecking ball
+        GFX.drawShadow(ctx, bsx, Camera.screenY(this.arena.floorY), 18, 0.3);
+        const ballGrad = ctx.createRadialGradient(bsx - 6, bsy - 6, 2, bsx, bsy, this.ballRadius);
+        ballGrad.addColorStop(0, '#888');
+        ballGrad.addColorStop(0.5, '#555');
+        ballGrad.addColorStop(1, '#222');
+        ctx.fillStyle = ballGrad;
+        ctx.beginPath();
+        ctx.arc(bsx, bsy, this.ballRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // Spikes
+        ctx.fillStyle = '#BBB';
+        for (let i = 0; i < 6; i++) {
+            const a = i * Math.PI / 3 + this.swingPhase * 0.5;
+            const px = bsx + Math.cos(a) * this.ballRadius;
+            const py = bsy + Math.sin(a) * this.ballRadius;
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px + Math.cos(a) * 5, py + Math.sin(a) * 5);
+            ctx.lineTo(px + Math.cos(a + 0.2) * 3, py + Math.sin(a + 0.2) * 3);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Rotor on top of pod (two spinning blades)
+        const rotorY = sy - this.h * 0.55;
+        const rc = Math.cos(this.rotorPhase);
+        const rs = Math.sin(this.rotorPhase);
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = '#CCC';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(sx - 26 * rc, rotorY - 2 * rs);
+        ctx.lineTo(sx + 26 * rc, rotorY + 2 * rs);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(sx - 26 * rs, rotorY + 2 * rc);
+        ctx.lineTo(sx + 26 * rs, rotorY - 2 * rc);
+        ctx.stroke();
+        ctx.restore();
+
+        // Rotor mast
+        ctx.fillStyle = '#555';
+        ctx.fillRect(sx - 2, sy - this.h * 0.55, 4, this.h * 0.25);
+
+        // Pod body (the weak point). Flash white on invuln.
+        const flash = this.flashing();
+        ctx.save();
+        if (flash) {
+            ctx.shadowColor = '#fff';
+            ctx.shadowBlur = 16;
+        }
+        GFX.drawShadow(ctx, sx, Camera.screenY(this.arena.floorY), 28, 0.22);
+
+        // Dome
+        const podGrad = ctx.createLinearGradient(sx - 30, sy - 18, sx + 30, sy + 18);
+        podGrad.addColorStop(0, flash ? '#fff' : '#DD3322');
+        podGrad.addColorStop(0.5, flash ? '#fff' : '#FF5533');
+        podGrad.addColorStop(1, flash ? '#fff' : '#AA2211');
+        ctx.fillStyle = podGrad;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, this.w / 2, this.h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#660000';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Cockpit window
+        ctx.fillStyle = flash ? '#fff' : '#224477';
+        ctx.beginPath();
+        ctx.ellipse(sx - 4, sy - 4, 16, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#CCCC88';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Eggman silhouette (mustache + goggles) inside
+        if (!flash) {
+            ctx.fillStyle = '#FFCC88';
+            ctx.beginPath();
+            ctx.arc(sx - 4, sy - 4, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#111';
+            ctx.fillRect(sx - 10, sy - 6, 12, 2);
+            ctx.fillRect(sx - 10, sy, 10, 1.5); // mustache
+        }
+
+        // Engine glow (bottom vents)
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const glowPulse = 0.5 + Math.sin(this.time * 0.2) * 0.3;
+        GFX.drawGlow(ctx, sx - 14, sy + this.h * 0.35, 12, 'rgba(255,160,60,0.8)', glowPulse);
+        GFX.drawGlow(ctx, sx + 14, sy + this.h * 0.35, 12, 'rgba(255,160,60,0.8)', glowPulse);
+        ctx.restore();
+
+        ctx.restore();
+    }
+
+    getBounds() {
+        // Pod body is the weak point — chain/ball are handled separately.
+        return {
+            x: this.x - this.w / 2 + 4,
+            y: this.y - this.h / 2 + 4,
+            w: this.w - 8,
+            h: this.h - 8,
+        };
+    }
+}
+
+// ---- ZONE 2 BOSS: CRUSHER ----
+// Teleporting turret-mech. Warps to one of four positions along the arena
+// floor, telegraphs from its eye, then fires a thick horizontal laser
+// beam. While recovering from the shot it crouches on the ground with its
+// head exposed — that's the only time its body is hittable. Phase 2 adds
+// twin ground shockwaves after recovery that the player has to jump over.
+class FactoryBoss extends Boss {
+    constructor(x, y, arena) {
+        super(x, y, arena);
+        this.name = 'CRUSHER';
+        this.maxHp = 6;
+        this.hp = 6;
+        this.w = 64;
+        this.h = 72;
+        this.mode = 'idle'; // idle, teleport_out, teleport_in, aim, fire, stunned
+        this.modeTimer = 0;
+        this.stompPositions = [
+            arena.left + 140,
+            arena.left + 320,
+            arena.left + 500,
+            arena.left + 680,
+        ];
+        this.stompIndex = 1;
+        // Picked at the start of teleport_out and telegraphed on the floor
+        // so the player can see where the boss will reappear.
+        this.nextStompIndex = 1;
+        this.visible = true;
+        this.beamHeight = 0;
+        this.beamProjectile = null;
+    }
+
+    onActivate() {
+        this.y = this.arena.floorY - this.h / 2;
+        this.x = this.stompPositions[1];
+        this.homeY = this.y;
+        this._enterMode('idle', 40);
+    }
+
+    _enterMode(mode, duration) {
+        this.mode = mode;
+        this.modeTimer = duration;
+    }
+
+    _chooseNextPosition() {
+        // Pick a position that's different from the current one so the
+        // teleport actually repositions the threat. Biased toward landing
+        // near the player for tension, but the destination is committed at
+        // the start of teleport_out and telegraphed on the floor so the
+        // player can dodge.
+        const candidates = [];
+        for (let i = 0; i < this.stompPositions.length; i++) {
+            if (i !== this.stompIndex) candidates.push(i);
+        }
+        candidates.sort((a, b) =>
+            Math.abs(this.stompPositions[a] - Player.x) -
+            Math.abs(this.stompPositions[b] - Player.x));
+        // 50% closest to player, 50% one of the other slots. Slightly
+        // less mean than the old 60/40 split now that it's pre-telegraphed.
+        let idx = Math.random() < 0.5
+            ? candidates[0]
+            : candidates[1 + (Math.random() * (candidates.length - 1) | 0)];
+        return Math.max(0, Math.min(this.stompPositions.length - 1, idx));
+    }
+
+    updateAI(player) {
+        this.facing = player.x < this.x ? -1 : 1;
+        this.modeTimer--;
+
+        switch (this.mode) {
+            case 'idle':
+                if (this.modeTimer <= 0) {
+                    // Pick the landing slot up front so teleport_out can
+                    // telegraph the destination for the whole window.
+                    this.nextStompIndex = this._chooseNextPosition();
+                    this._enterMode('teleport_out', 38);
+                }
+                break;
+
+            case 'teleport_out':
+                // Boss fades out over the first third of the window, leaving
+                // the remainder as a clear "where am I coming back" warning.
+                this.visible = this.modeTimer > 26;
+                {
+                    const targetX = this.stompPositions[this.nextStompIndex];
+                    // Red warning sparks shoot up from the target floor spot
+                    // every frame so the player's eye is drawn to it.
+                    if ((this.time & 1) === 0) {
+                        World.addParticle(
+                            targetX + Utils.rand(-18, 18),
+                            this.homeY + this.h / 2,
+                            Utils.rand(-0.6, 0.6),
+                            Utils.rand(-3, -1),
+                            22, 'spark');
+                    }
+                }
+                if (this.modeTimer <= 0) {
+                    this.stompIndex = this.nextStompIndex;
+                    this.x = this.stompPositions[this.stompIndex];
+                    this.facing = player.x < this.x ? -1 : 1;
+                    this.y = this.homeY + 80; // pop up from below
+                    this._enterMode('teleport_in', 22);
+                    // Teleport in effect
+                    for (let i = 0; i < 10; i++) {
+                        World.addParticle(this.x + Utils.rand(-20, 20), this.homeY,
+                            Utils.rand(-2, 2), Utils.rand(-4, -1), 30, 'spark');
+                    }
+                }
+                break;
+
+            case 'teleport_in':
+                this.visible = true;
+                // Rise to home y
+                this.y += (this.homeY - this.y) * 0.2;
+                if (this.modeTimer <= 0) {
+                    this.y = this.homeY;
+                    this._enterMode('aim', 36);
+                }
+                break;
+
+            case 'aim':
+                // Eye telegraph, pulse intensifies as timer runs out
+                if (this.modeTimer <= 0) {
+                    this._fireBeam();
+                    this._enterMode('fire', 40);
+                }
+                break;
+
+            case 'fire':
+                // Beam lives as a projectile entity we spawned. Keep aiming
+                // direction locked while firing.
+                if (this.modeTimer <= 0) {
+                    if (this.beamProjectile) this.beamProjectile.active = false;
+                    this.beamProjectile = null;
+                    // Longer stun window so landing a jump-attack on the
+                    // head doesn't demand pixel-perfect timing.
+                    this._enterMode('stunned', 105);
+                    // Phase 2: ground shockwaves
+                    if (this.hp <= 3) {
+                        this._fireShockwaves();
+                    }
+                }
+                break;
+
+            case 'stunned':
+                // Crouched + head exposed, vulnerable. Steam wisps out.
+                if ((this.time & 3) === 0) {
+                    World.addParticle(this.x + Utils.rand(-12, 12),
+                        this.y - this.h / 2 - 4,
+                        Utils.rand(-0.5, 0.5), -1.2, 40, 'sparkle');
+                }
+                if (this.modeTimer <= 0) {
+                    this._enterMode('idle', 30);
+                }
+                break;
+        }
+    }
+
+    _fireBeam() {
+        const sign = this.facing;
+        const eyeY = this.y - this.h / 2 + 14;
+        // Beam spans from the eye to the arena wall in the facing direction.
+        const beamSpanX = sign > 0 ? this.arena.right - this.x : this.x - this.arena.left;
+        const beam = new BossProjectile(
+            this.x + sign * (beamSpanX / 2 + 8),
+            eyeY,
+            0, 0, 40, 'laser',
+            { w: beamSpanX, h: 12, color: '#FF4444' }
+        );
+        beam.hot = true;
+        World.entities.push(beam);
+        this.beamProjectile = beam;
+        Sound.spinDash(); // re-use the aggressive rev as a laser charge sfx
+        Camera.shake(2, 6);
+    }
+
+    _fireShockwaves() {
+        const y = this.arena.floorY - 8;
+        World.entities.push(new BossProjectile(this.x - 30, y, -4.5, 0, 60, 'shockwave',
+            { w: 22, h: 12 }));
+        World.entities.push(new BossProjectile(this.x + 30, y, 4.5, 0, 60, 'shockwave',
+            { w: 22, h: 12 }));
+    }
+
+    // Body damages the player unless in 'stunned' mode.
+    getBounds() {
+        return {
+            x: this.x - this.w / 2,
+            y: this.y - this.h / 2,
+            w: this.w,
+            h: this.h,
+        };
+    }
+
+    // Only the head is a valid hit target, and only when stunned (or vulnerable
+    // during aim wind-down).
+    getWeakBounds() {
+        if (this.mode !== 'stunned') {
+            // No weak point exposed - return an offscreen rect so the ball
+            // collision check always misses.
+            return { x: -9999, y: -9999, w: 1, h: 1 };
+        }
+        // Wider, taller target so the weak spot matches the visible head
+        // silhouette instead of demanding a pixel-perfect bop.
+        return {
+            x: this.x - 30,
+            y: this.y - this.h / 2 - 4,
+            w: 60,
+            h: 32,
+        };
+    }
+
+    draw(ctx) {
+        // Telegraph the teleport destination on the floor whether or not the
+        // boss sprite itself is visible, so the player can see where it's
+        // about to reappear during the invisible half of teleport_out.
+        if (this.mode === 'teleport_out') {
+            this._drawTeleportTelegraph(ctx);
+        }
+
+        if (!this.visible) return;
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y);
+        const flash = this.flashing();
+        const crouch = this.mode === 'stunned' ? 8 : 0;
+
+        GFX.drawShadow(ctx, sx, Camera.screenY(this.arena.floorY), 34, 0.32);
+
+        // Legs / treads (chunky industrial base)
+        ctx.fillStyle = flash ? '#fff' : '#3A3750';
+        ctx.fillRect(sx - this.w / 2, sy + this.h / 2 - 18, this.w, 18);
+        ctx.fillStyle = flash ? '#fff' : '#222030';
+        for (let i = 0; i < 5; i++) {
+            const tx = sx - this.w / 2 + 6 + i * (this.w - 12) / 4;
+            ctx.beginPath();
+            ctx.arc(tx, sy + this.h / 2 - 6, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Hip pistons
+        ctx.fillStyle = flash ? '#fff' : '#555';
+        ctx.fillRect(sx - 18, sy + this.h / 2 - 26 + crouch, 8, 12);
+        ctx.fillRect(sx + 10, sy + this.h / 2 - 26 + crouch, 8, 12);
+
+        // Torso plate
+        ctx.save();
+        ctx.translate(sx, sy + crouch);
+        const bodyGrad = ctx.createLinearGradient(0, -this.h / 2, 0, this.h / 2);
+        bodyGrad.addColorStop(0, flash ? '#fff' : '#5E4FB2');
+        bodyGrad.addColorStop(1, flash ? '#fff' : '#2B2560');
+        ctx.fillStyle = bodyGrad;
+        ctx.fillRect(-this.w / 2 + 4, -this.h / 2 + 10, this.w - 8, this.h - 30);
+        ctx.strokeStyle = flash ? '#fff' : '#100E30';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-this.w / 2 + 4, -this.h / 2 + 10, this.w - 8, this.h - 30);
+
+        // Shoulder bolts
+        ctx.fillStyle = flash ? '#fff' : '#FFD044';
+        ctx.beginPath(); ctx.arc(-this.w / 2 + 10, -this.h / 2 + 18, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(this.w / 2 - 10, -this.h / 2 + 18, 3, 0, Math.PI * 2); ctx.fill();
+
+        // Head "helmet" — smaller when stunned
+        const headScale = this.mode === 'stunned' ? 0.85 : 1.0;
+        const headY = -this.h / 2 + 6;
+        ctx.fillStyle = flash ? '#fff' : '#7766CC';
+        ctx.beginPath();
+        ctx.ellipse(0, headY, 18 * headScale, 14 * headScale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = flash ? '#fff' : '#100E30';
+        ctx.stroke();
+
+        // The eye: giant single lens that glows + charges before firing.
+        const eyeR = 7 * headScale;
+        const aimT = this.mode === 'aim' ? (1 - Math.max(0, this.modeTimer) / 36) : 0;
+        const firing = this.mode === 'fire';
+        const eyeColor = firing ? '#FF3333' : (this.mode === 'aim' ? '#FFAA44' : '#FF6644');
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(this.facing * 3, headY, eyeR + 1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = eyeColor;
+        ctx.beginPath();
+        ctx.arc(this.facing * 3, headY, eyeR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(this.facing * 3 + 2, headY - 2, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+
+        // Eye glow — drawn outside translated ctx so screen coords are honored.
+        const glowR = 14 + aimT * 14 + (firing ? 10 : 0);
+        GFX.drawGlow(ctx, sx + this.facing * 3, sy + crouch + headY,
+            glowR, 'rgba(255,80,80,0.85)', 1);
+
+        // Charge-up crackle during aim
+        if (this.mode === 'aim' && (this.time & 1) === 0) {
+            const ey = this.y - this.h / 2 + 14;
+            for (let i = 0; i < 2; i++) {
+                World.addParticle(this.x + this.facing * 4, ey,
+                    this.facing * Utils.rand(1, 3) + Utils.rand(-1, 1),
+                    Utils.rand(-1, 1), 14, 'spark');
+            }
+        }
+    }
+
+    // Red floor marker + downward arrow at the telegraphed teleport
+    // destination. Drawn from draw() during teleport_out so the player has
+    // time to clear the landing zone before the boss reappears.
+    _drawTeleportTelegraph(ctx) {
+        const tx = this.stompPositions[this.nextStompIndex];
+        const sx = Camera.screenX(tx);
+        const floorSY = Camera.screenY(this.arena.floorY);
+        const total = 38;
+        const progress = 1 - Math.max(0, this.modeTimer) / total;
+        const pulse = 0.55 + Math.sin(this.time * 0.55) * 0.45;
+
+        // Ground-level glow bloom
+        GFX.drawGlow(ctx, sx, floorSY - 4, 22 + progress * 16,
+            'rgba(255,70,70,0.9)', 0.75 * pulse);
+
+        // Pulsing elliptical ring hugging the floor
+        ctx.save();
+        ctx.strokeStyle = `rgba(255,110,110,${0.85 * pulse})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(sx, floorSY - 3,
+            24 + progress * 10, 7 + progress * 2,
+            0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Downward warning triangle hovering above the spot
+        const arrowY = floorSY - 44 - Math.sin(this.time * 0.4) * 3;
+        ctx.fillStyle = `rgba(255,80,80,${0.9 * pulse})`;
+        ctx.strokeStyle = '#440000';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(sx, arrowY + 12);
+        ctx.lineTo(sx - 9, arrowY);
+        ctx.lineTo(sx + 9, arrowY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// ---- ZONE 3 BOSS: FINAL EGGMOBILE ----
+// Flying pod that patrols the upper arena and drops bombs. Every few cycles
+// it arms up and dives at the player in a J-shaped arc — that dive is the
+// best window to ball-bounce the pod. At half HP it spawns flying minions
+// to divide the player's attention, and at critical HP its attack tempo
+// doubles for a chaotic final push.
+class SkyBoss extends Boss {
+    constructor(x, y, arena) {
+        super(x, y, arena);
+        this.name = 'EGG WRECKER';
+        this.maxHp = 7;
+        this.hp = 7;
+        this.w = 70;
+        this.h = 50;
+        this.mode = 'hover'; // hover, dive, recover, bomb, summon
+        this.modeTimer = 90;
+        this.hoverPhase = 0;
+        this.propPhase = 0;
+        this.diveFromX = x;
+        this.diveFromY = y;
+        this.diveToX = x;
+        this.diveToY = y;
+        this.diveT = 0;
+        this.minionsSpawned = false;
+    }
+
+    onActivate() {
+        // Hover above the arena's top jump platform so a player jumping from
+        // there can reach the pod. Top platform is at tile-row 11 (y = 352);
+        // a ball-form jump from it leaves Sonic's body around y = 183..205.
+        // Parking the pod around y = 202 puts the weak bounds at ~183..223
+        // so there's a comfortable overlap window instead of pixel-perfect.
+        this.homeY = this.arena.floorY - 310;
+        this.y = this.arena.top - 40;
+        this.x = this.arena.centerX;
+    }
+
+    updateAI(player) {
+        this.propPhase += 0.6;
+        this.facing = player.x < this.x ? -1 : 1;
+        this.modeTimer--;
+
+        // Drive patterns differ per phase:
+        //   Phase 1 (7-5): hover + bomb
+        //   Phase 2 (4-3): add dive attacks, spawn minions once
+        //   Phase 3 (<=2): rapid bomb + dive cycle
+        const phase = this.hp <= 2 ? 3 : (this.hp <= 4 ? 2 : 1);
+
+        switch (this.mode) {
+            case 'hover':
+                this.hoverPhase += 0.02;
+                {
+                    const driftX = Math.sin(this.hoverPhase) * 130;
+                    const tx = this.arena.centerX + driftX;
+                    this.x += (tx - this.x) * 0.05;
+                    const ty = this.homeY + Math.sin(this.hoverPhase * 2) * 10;
+                    this.y += (ty - this.y) * 0.08;
+                }
+                if (this.modeTimer <= 0) {
+                    // Choose next attack based on phase
+                    const roll = Math.random();
+                    if (phase === 1) {
+                        this._startBomb();
+                    } else if (phase === 2) {
+                        if (!this.minionsSpawned) {
+                            this._summonMinions();
+                            this.minionsSpawned = true;
+                        } else if (roll < 0.55) {
+                            this._startDive(player);
+                        } else {
+                            this._startBomb();
+                        }
+                    } else {
+                        if (roll < 0.6) this._startDive(player);
+                        else this._startBomb();
+                    }
+                }
+                break;
+
+            case 'bomb':
+                if (this.modeTimer <= 0) {
+                    this._dropBomb();
+                    const base = phase === 3 ? 30 : (phase === 2 ? 55 : 75);
+                    this._enterMode('hover', base);
+                }
+                break;
+
+            case 'dive':
+                // J-shaped arc parameterized by diveT 0..1. Phase 3 is
+                // slightly slower than before so the player still has time
+                // to read the dive after the low-HP tempo change.
+                this.diveT += phase === 3 ? 0.019 : 0.016;
+                if (this.diveT > 1) this.diveT = 1;
+                {
+                    const t = this.diveT;
+                    // Linear traverse with a parabolic lift over the midpoint:
+                    // starts cleanly at (diveFromX, diveFromY) and ends at
+                    // (diveToX, diveToY) so the pod visibly sweeps in instead
+                    // of snapping next to the player on frame 1.
+                    const ex = this.diveFromX + (this.diveToX - this.diveFromX) * t;
+                    const peak = -4 * (t - 0.5) * (t - 0.5) + 1;
+                    const ey = this.diveFromY
+                        + (this.diveToY - this.diveFromY) * t
+                        - peak * 32;
+                    this.x = ex;
+                    this.y = ey;
+                }
+                if (this.diveT >= 1) {
+                    this._enterMode('recover', phase === 3 ? 34 : 50);
+                }
+                break;
+
+            case 'recover':
+                {
+                    const ty = this.homeY;
+                    this.y += (ty - this.y) * 0.08;
+                }
+                if (this.modeTimer <= 0) {
+                    const base = phase === 3 ? 40 : 70;
+                    this._enterMode('hover', base);
+                }
+                break;
+        }
+    }
+
+    _enterMode(mode, duration) {
+        this.mode = mode;
+        this.modeTimer = duration;
+    }
+
+    _startBomb() {
+        this._enterMode('bomb', 28);
+    }
+
+    _startDive(player) {
+        this.diveFromX = this.x;
+        this.diveFromY = this.y;
+        // Target lands slightly past the player's current x so they have to dodge.
+        const offset = player.x > this.x ? 90 : -90;
+        this.diveToX = Utils.clamp(player.x + offset,
+            this.arena.left + 80, this.arena.right - 80);
+        this.diveToY = this.arena.floorY - 80;
+        this.diveT = 0;
+        this._enterMode('dive', 120);
+    }
+
+    _dropBomb() {
+        const bomb = new BossProjectile(this.x, this.y + this.h / 2, 0, 2, 240, 'bomb',
+            { w: 16, h: 16, color: '#222' });
+        bomb.gravity = 0.32;
+        World.entities.push(bomb);
+    }
+
+    _summonMinions() {
+        World.addPopup(this.x, this.y - 40, 'REINFORCEMENTS', '#FF6666');
+        // Spawn below the pod, between the boss and the top jump platform.
+        // The old arena.top + 80 (y=80) was above the camera's clamped top,
+        // so the flyers were effectively off-screen and the player never
+        // noticed them. This height keeps them inside the active play area.
+        const spawnY = this.homeY + 100;
+        for (let i = 0; i < 2; i++) {
+            const side = i === 0 ? -1 : 1;
+            const spawnX = side < 0 ? this.arena.left + 40 : this.arena.right - 40;
+            const f = new Flyer(spawnX, spawnY, -side);
+            f.range = 220;
+            World.entities.push(f);
+            // Spark burst at each entry point so the player's eye catches
+            // the spawn even if they're looking at the boss.
+            for (let j = 0; j < 10; j++) {
+                const a = Utils.rand(0, Math.PI * 2);
+                World.addParticle(spawnX, spawnY,
+                    Math.cos(a) * Utils.rand(1, 3),
+                    Math.sin(a) * Utils.rand(1, 3),
+                    26, 'spark');
+            }
+        }
+    }
+
+    getBounds() {
+        // Pod body, slightly inset so the propeller visual doesn't over-grab.
+        return {
+            x: this.x - this.w / 2 + 4,
+            y: this.y - this.h / 2 + 6,
+            w: this.w - 8,
+            h: this.h - 10,
+        };
+    }
+
+    draw(ctx) {
+        const sx = Camera.screenX(this.x);
+        const sy = Camera.screenY(this.y);
+        const flash = this.flashing();
+
+        // Dropping shadow on arena floor below
+        GFX.drawShadow(ctx, sx, Camera.screenY(this.arena.floorY), 28, 0.25);
+
+        // Propeller blades above
+        const propY = sy - this.h / 2 - 8;
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        ctx.strokeStyle = '#CCC';
+        ctx.lineWidth = 3;
+        const a1 = this.propPhase;
+        const a2 = this.propPhase + Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(sx - 22 * Math.cos(a1), propY - 2 * Math.sin(a1));
+        ctx.lineTo(sx + 22 * Math.cos(a1), propY + 2 * Math.sin(a1));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(sx - 22 * Math.cos(a2), propY - 2 * Math.sin(a2));
+        ctx.lineTo(sx + 22 * Math.cos(a2), propY + 2 * Math.sin(a2));
+        ctx.stroke();
+        ctx.restore();
+
+        // Propeller mast
+        ctx.fillStyle = '#444';
+        ctx.fillRect(sx - 2, sy - this.h / 2 - 8, 4, 8);
+
+        // Pod hull (teardrop)
+        ctx.save();
+        if (flash) { ctx.shadowColor = '#fff'; ctx.shadowBlur = 18; }
+
+        const hullGrad = ctx.createLinearGradient(sx - 30, sy - 16, sx + 30, sy + 16);
+        hullGrad.addColorStop(0, flash ? '#fff' : '#8844AA');
+        hullGrad.addColorStop(0.5, flash ? '#fff' : '#CC66DD');
+        hullGrad.addColorStop(1, flash ? '#fff' : '#552277');
+        ctx.fillStyle = hullGrad;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, this.w / 2, this.h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#220033';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Canopy
+        ctx.fillStyle = flash ? '#fff' : '#224488';
+        ctx.beginPath();
+        ctx.ellipse(sx - 4, sy - 6, 20, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#FFD044';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        if (!flash) {
+            ctx.fillStyle = '#FFCC88';
+            ctx.beginPath();
+            ctx.arc(sx - 4, sy - 6, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#111';
+            ctx.fillRect(sx - 10, sy - 8, 12, 2);
+            ctx.fillRect(sx - 10, sy - 2, 10, 1.5);
+        }
+
+        // Side cannons
+        ctx.fillStyle = flash ? '#fff' : '#444';
+        ctx.fillRect(sx - this.w / 2 - 4, sy - 2, 10, 6);
+        ctx.fillRect(sx + this.w / 2 - 6, sy - 2, 10, 6);
+
+        // Twin engine glows
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const glowPulse = 0.55 + Math.sin(this.time * 0.25) * 0.35;
+        GFX.drawGlow(ctx, sx - 18, sy + this.h * 0.35, 12, 'rgba(255,140,220,0.85)', glowPulse);
+        GFX.drawGlow(ctx, sx + 18, sy + this.h * 0.35, 12, 'rgba(255,140,220,0.85)', glowPulse);
+        ctx.restore();
+
+        ctx.restore();
+
+        // Dive-charging exhaust trail
+        if (this.mode === 'dive' && (this.time & 1) === 0) {
+            World.addParticle(this.x, this.y + this.h / 2,
+                Utils.rand(-1, 1), Utils.rand(1, 3),
+                22, 'ember');
+        }
+    }
+}
+
 // Floating score/effect popup
 class Popup {
     constructor(x, y, text, color) {
@@ -565,16 +1836,29 @@ const World = {
     decorations: [],
     currentLevel: 0,
 
-    // Build a tile map from level description
+    // Build a tile map from level description.
+    // Six levels total: three zones × two acts each. Act 1 is the classic
+    // platforming run; Act 2 is a short runway + boss arena.
+    //   0: Zone 1 Act 1 (Emerald Valley)
+    //   1: Zone 1 Act 2 (Valley boss — Wrecker)
+    //   2: Zone 2 Act 1 (Neon Factory)
+    //   3: Zone 2 Act 2 (Factory boss — Crusher)
+    //   4: Zone 3 Act 1 (Sky Sanctuary)
+    //   5: Zone 3 Act 2 (Sky boss — Egg Wrecker, final)
     buildLevel(levelNum) {
         this.entities = [];
         this.particles = [];
         this.decorations = [];
         this.currentLevel = levelNum;
 
-        if (levelNum === 0) return this.buildLevel1();
-        if (levelNum === 1) return this.buildLevel2();
-        if (levelNum === 2) return this.buildLevel3();
+        switch (levelNum) {
+            case 0: return this.buildLevel1();
+            case 1: return this.buildZone1Act2();
+            case 2: return this.buildLevel2();
+            case 3: return this.buildZone2Act2();
+            case 4: return this.buildLevel3();
+            case 5: return this.buildZone3Act2();
+        }
     },
 
     // ---- LEVEL 1: EMERALD VALLEY ----
@@ -1222,6 +2506,295 @@ const World = {
         };
 
         return this.level;
+    },
+
+    // Internal helper used by all three boss acts: lays down a short runway,
+    // a flat arena with invisible wall + trigger, and places a boss at the
+    // center of the arena. Each zone act is just (runway tiles, boss class,
+    // theme, decorations) on top of this shared skeleton.
+    _buildBossAct(config) {
+        const T = CFG.TILE;
+        const W = config.width;
+        const H = config.height;
+        const theme = config.theme;
+        const groundRow = config.groundRow;
+        const tiles = Array.from({ length: H }, () => new Array(W).fill(TILE.EMPTY));
+
+        // Flat ground across the whole act.
+        for (let x = 0; x < W; x++) {
+            tiles[groundRow][x] = TILE.SOLID;
+            for (let y = groundRow + 1; y < H; y++) {
+                tiles[y][x] = TILE.FILL;
+            }
+        }
+
+        // Small platforming detail on the runway so Act 2 isn't just "run
+        // 15 tiles to a boss room". Each config can override this.
+        (config.platforms || []).forEach(([px, py, pw]) => {
+            for (let x = px; x < px + pw && x < W; x++) {
+                tiles[py][x] = TILE.PLATFORM;
+            }
+        });
+
+        const ents = this.entities;
+        const playerStart = { x: 3 * T + 16, y: groundRow * T };
+
+        (config.rings || []).forEach(r => ents.push(new Ring(r.x * T + 16, r.y * T + 16)));
+        (config.enemies || []).forEach(e => ents.push(e));
+
+        // Arena extents (pixel-space). Camera locks here once the trigger fires.
+        const arenaLeftT = config.arenaLeftTile;
+        const arenaLeftX = arenaLeftT * T;
+        const arenaRightX = W * T;
+        const floorY = groundRow * T;
+        const arena = {
+            left: arenaLeftX,
+            right: arenaRightX,
+            top: 0,
+            bottom: H * T,
+            centerX: (arenaLeftX + arenaRightX) / 2,
+            floorY: floorY,
+        };
+
+        // Boss spawns in a "waiting" phase at its home position above arena.
+        const bossHomeX = config.bossHomeX != null
+            ? config.bossHomeX
+            : arena.centerX;
+        const bossHomeY = config.bossHomeY != null
+            ? config.bossHomeY
+            : floorY - 180;
+        const boss = new config.bossClass(bossHomeX, bossHomeY, arena);
+        ents.push(boss);
+
+        // Energy walls: one at the entrance slams shut behind the player on
+        // trigger, another just before the goal post blocks the exit until
+        // the boss is defeated. Both are disabled until the trigger fires and
+        // both drop together on Boss.onDefeated.
+        const entryWall = new BossWall(arenaLeftX + 8, 0, H * T);
+        ents.push(entryWall);
+
+        const goalX = config.goalTile != null ? config.goalTile : (W - 3);
+        const exitWallX = (goalX - 2) * T;
+        const exitWall = new BossWall(exitWallX, 0, H * T);
+        ents.push(exitWall);
+
+        // Trigger line just inside the arena entrance.
+        const trigger = new BossTrigger(arenaLeftX + 32, 0, boss, entryWall);
+        ents.push(trigger);
+
+        // Goal post placed behind the exit wall so the boss must be defeated
+        // before the player can reach it.
+        ents.push(new GoalPost(goalX * T, groundRow * T));
+
+        this.decorations.push(...(config.decorations || []));
+
+        this.level = {
+            width: W,
+            height: H,
+            tiles,
+            theme,
+            playerStart,
+            bgMusic: config.bgMusic,
+            isBossAct: true,
+        };
+
+        Camera.bounds = { minX: 0, minY: 0, maxX: W * T, maxY: H * T };
+
+        return this.level;
+    },
+
+    // ---- ZONE 1 ACT 2: VALLEY SHOWDOWN ----
+    // Short grass runway with a couple enemies and rings to warm up, then
+    // straight into the Wrecker boss arena.
+    buildZone1Act2() {
+        const T = CFG.TILE;
+        const W = 50, H = 22, groundRow = 16;
+
+        const rings = [
+            ...this._ringLine(6, 14, 5, 0),
+            ...this._ringLine(12, 14, 4, 0),
+        ];
+        const enemies = [
+            new Crawler(8 * T, groundRow * T - 16, 1),
+            new Flyer(10 * T, 10 * T, -1),
+        ];
+        const platforms = [
+            [7, 13, 3],
+            [12, 11, 3],
+        ];
+        const decorations = [
+            { type: 'tree', x: 5 * T, y: groundRow * T },
+            { type: 'flower', x: 9 * T, y: groundRow * T, color: '#FF4488' },
+            { type: 'tree', x: 45 * T, y: groundRow * T },
+            { type: 'flower', x: 42 * T, y: groundRow * T, color: '#44AAFF' },
+        ];
+
+        return this._buildBossAct({
+            width: W, height: H, theme: 1, groundRow,
+            platforms, rings, enemies, decorations,
+            arenaLeftTile: 18,
+            bossClass: ValleyBoss,
+            bossHomeX: (18 * T + W * T) / 2,
+            bossHomeY: groundRow * T - 190,
+            goalTile: W - 4,
+            bgMusic: World._zone1Act1Music(),
+        });
+    },
+
+    // ---- ZONE 2 ACT 2: FACTORY LOCKDOWN ----
+    buildZone2Act2() {
+        const T = CFG.TILE;
+        const W = 50, H = 22, groundRow = 16;
+
+        const rings = [
+            ...this._ringLine(6, 14, 5, 0),
+            ...this._ringLine(13, 13, 3, 0),
+        ];
+        const enemies = [
+            new Crawler(8 * T, groundRow * T - 16, 1),
+            new Crawler(14 * T, groundRow * T - 16, -1),
+            new Flyer(11 * T, 10 * T, -1),
+        ];
+        const platforms = [
+            [8, 13, 3],
+            [13, 11, 3],
+        ];
+        const decorations = [
+            { type: 'factory', x: 4 * T, y: groundRow * T },
+            { type: 'factory', x: 44 * T, y: groundRow * T },
+        ];
+
+        return this._buildBossAct({
+            width: W, height: H, theme: 2, groundRow,
+            platforms, rings, enemies, decorations,
+            arenaLeftTile: 18,
+            bossClass: FactoryBoss,
+            bossHomeX: (18 * T + W * T) / 2,
+            bossHomeY: groundRow * T - 36,
+            goalTile: W - 4,
+            bgMusic: World._zone2Act1Music(),
+        });
+    },
+
+    // ---- ZONE 3 ACT 2: FINAL SHOWDOWN ----
+    // Slightly longer arena and bigger decorations befitting the final boss.
+    buildZone3Act2() {
+        const T = CFG.TILE;
+        const W = 54, H = 22, groundRow = 16;
+
+        const rings = [
+            ...this._ringLine(6, 14, 6, 0),
+            ...this._ringLine(13, 12, 4, 0),
+            ...this._ringArc(16, 13, 2, 3),
+        ];
+        const enemies = [
+            new Crawler(10 * T, groundRow * T - 16, -1),
+            new Flyer(12 * T, 9 * T, 1),
+        ];
+        const platforms = [
+            [7, 13, 3],
+            [13, 10, 3],
+            // Arena-side jump platforms so the player can reach the flying
+            // boss. Lowered from rows 11/9/11 so climbing the stack doesn't
+            // require near-perfect jumps; the boss hover height was lowered
+            // to match so the weak-bounds stay reachable from the top.
+            [24, 13, 3],
+            [33, 11, 3],
+            [42, 13, 3],
+        ];
+        const decorations = [
+            { type: 'pillar', x: 4 * T, y: groundRow * T },
+            { type: 'pillar', x: 17 * T, y: groundRow * T },
+            { type: 'pillar', x: 25 * T, y: groundRow * T },
+            { type: 'pillar', x: 41 * T, y: groundRow * T },
+            { type: 'pillar', x: 49 * T, y: groundRow * T },
+        ];
+
+        return this._buildBossAct({
+            width: W, height: H, theme: 3, groundRow,
+            platforms, rings, enemies, decorations,
+            arenaLeftTile: 20,
+            bossClass: SkyBoss,
+            bossHomeX: (20 * T + W * T) / 2,
+            bossHomeY: groundRow * T - 260,
+            goalTile: W - 4,
+            bgMusic: World._zone3Act1Music(),
+        });
+    },
+
+    // Music-descriptor getters — lazy so the per-act builders don't have to
+    // copy-paste the full track data. They just pull the same soundtrack as
+    // that zone's Act 1 during the runway; BossTrigger swaps to BOSS_MUSIC
+    // when the fight actually starts.
+    _zone1Act1Music() {
+        // Extracted from buildLevel1 so both acts can share it.
+        return {
+            tempo: 150, swing: 0.22,
+            lead: [
+                523, 0, 659, 0, 784, 0, 0, 1047, 0, 0, 784, 0, 0, 659, 0, 0,
+                494, 0, 587, 0, 784, 0, 0, 988, 0, 0, 784, 0, 0, 587, 0, 0,
+                523, 0, 659, 0, 880, 0, 0, 1047, 0, 0, 880, 0, 0, 784, 659, 0,
+                523, 0, 698, 0, 880, 0, 0, 1047, 0, 0, 880, 0, 0, 784, 659, 0,
+            ],
+            arp: [
+                262, 0, 330, 0, 392, 0, 523, 0, 392, 0, 330, 0, 392, 0, 523, 0,
+                294, 0, 392, 0, 494, 0, 587, 0, 494, 0, 392, 0, 494, 0, 587, 0,
+                220, 0, 262, 0, 330, 0, 440, 0, 330, 0, 262, 0, 330, 0, 440, 0,
+                175, 0, 220, 0, 262, 0, 349, 0, 262, 0, 220, 0, 262, 0, 349, 0,
+            ],
+            bass: [
+                65, 0, 131, 0, 65, 0, 131, 0, 98, 0, 196, 0, 82, 0, 165, 0,
+                98, 0, 196, 0, 98, 0, 196, 0, 73, 0, 147, 0, 123, 0, 247, 0,
+                110, 0, 220, 0, 110, 0, 220, 0, 82, 0, 165, 0, 131, 0, 262, 0,
+                87, 0, 175, 0, 87, 0, 175, 0, 131, 0, 262, 0, 110, 0, 98, 0,
+            ]
+        };
+    },
+    _zone2Act1Music() {
+        return {
+            tempo: 160, swing: 0.08,
+            lead: [
+                440, 0, 523, 0, 659, 0, 880, 0, 784, 0, 659, 0, 523, 0, 0, 0,
+                440, 0, 523, 0, 698, 0, 880, 0, 784, 0, 698, 0, 523, 0, 0, 0,
+                494, 0, 587, 0, 784, 0, 988, 0, 880, 0, 784, 0, 587, 0, 0, 0,
+                659, 0, 784, 0, 988, 0, 1319, 0, 1175, 0, 988, 0, 880, 784, 659, 0,
+            ],
+            arp: [
+                220, 0, 262, 0, 330, 0, 440, 0, 330, 0, 262, 0, 330, 0, 440, 0,
+                175, 0, 220, 0, 262, 0, 349, 0, 262, 0, 220, 0, 262, 0, 349, 0,
+                196, 0, 247, 0, 294, 0, 392, 0, 294, 0, 247, 0, 294, 0, 392, 0,
+                165, 0, 196, 0, 247, 0, 330, 0, 247, 0, 196, 0, 247, 0, 330, 0,
+            ],
+            bass: [
+                55, 0, 110, 0, 55, 0, 110, 0, 82, 0, 165, 0, 110, 0, 98, 0,
+                44, 0, 87, 0, 44, 0, 87, 0, 65, 0, 131, 0, 87, 0, 82, 0,
+                49, 0, 98, 0, 49, 0, 98, 0, 73, 0, 147, 0, 98, 0, 123, 0,
+                41, 0, 82, 0, 41, 0, 82, 0, 62, 0, 123, 0, 82, 0, 73, 0,
+            ]
+        };
+    },
+    _zone3Act1Music() {
+        return {
+            tempo: 135, swing: 0.16,
+            lead: [
+                784, 0, 0, 988, 0, 1175, 0, 988, 0, 0, 784, 0, 0, 587, 0, 0,
+                880, 0, 0, 1175, 0, 1480, 0, 1175, 0, 0, 880, 0, 0, 740, 0, 0,
+                988, 0, 0, 1319, 0, 1568, 0, 1319, 0, 0, 988, 0, 0, 784, 0, 0,
+                1047, 0, 0, 1319, 0, 1568, 0, 1319, 0, 0, 1047, 0, 784, 659, 587, 0,
+            ],
+            arp: [
+                392, 0, 494, 0, 587, 0, 784, 0, 587, 0, 494, 0, 587, 0, 784, 0,
+                294, 0, 370, 0, 440, 0, 587, 0, 440, 0, 370, 0, 440, 0, 587, 0,
+                330, 0, 392, 0, 494, 0, 659, 0, 494, 0, 392, 0, 494, 0, 659, 0,
+                262, 0, 330, 0, 392, 0, 523, 0, 392, 0, 330, 0, 392, 0, 523, 0,
+            ],
+            bass: [
+                98, 0, 196, 0, 98, 0, 196, 0, 73, 0, 147, 0, 123, 0, 247, 0,
+                73, 0, 147, 0, 73, 0, 147, 0, 110, 0, 220, 0, 92, 0, 185, 0,
+                82, 0, 165, 0, 82, 0, 165, 0, 123, 0, 247, 0, 98, 0, 196, 0,
+                65, 0, 131, 0, 65, 0, 131, 0, 98, 0, 196, 0, 82, 0, 73, 0,
+            ]
+        };
     },
 
     // Helper: create a horizontal line of ring positions
